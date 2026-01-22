@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocHub - Central de Documentação</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        // cache-buster: força recarregar styles.css ao abrir a página
+        (function(){
+            try {
+                const links = document.querySelectorAll('link[rel="stylesheet"]');
+                links.forEach(l => {
+                    if(l.getAttribute('href') && l.getAttribute('href').indexOf('styles.css') !== -1){
+                        const base = 'styles.css';
+                        const url = base + '?v=' + Date.now();
+                        l.setAttribute('href', url);
+                    }
+                });
+            } catch(e){ /* silencioso */ }
+        })();
+    </script>
+</head>
+<body>
+    
+    <nav class="navbar">
+        <div class="navbar-container">
+            <div class="navbar-logo">
+                <span class="logo-icon">📚</span>
+                <h1 class="navbar-title">DocHub</h1>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#" data-section="documentos" class="nav-link active">📄 Documentos</a></li>
+                <li><a href="#" data-section="exemplos" class="nav-link">📌 Exemplos</a></li>
+            </ul>
+            <div class="top-actions">
+                <button id="topSettingsBtn" class="btn-settings" title="Configurações" aria-label="Configurações">
+                    <!-- polished SVG gear -->
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" fill="#fff" />
+                        <path d="M19.4 13.1c.04-.36.06-.73.06-1.11s-.02-.75-.06-1.11l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.07 7.07 0 0 0-1.9-1.1l-.38-2.65A.5.5 0 0 0 12.6 2h-3a.5.5 0 0 0-.5.42l-.38 2.66a7.07 7.07 0 0 0-1.9 1.1l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.5 10.9c-.04.36-.06.73-.06 1.11s.02.75.06 1.11L2.39 14.87a.5.5 0 0 0-.12.64l2 3.46c.14.24.43.34.68.24l2.49-1c.6.48 1.26.87 1.95 1.16l.38 2.66c.05.26.27.44.52.44h3c.25 0 .47-.18.52-.44l.38-2.66c.7-.29 1.35-.68 1.95-1.16l2.49 1c.25.1.54 0 .68-.24l2-3.46a.5.5 0 0 0-.12-.64L19.4 13.1z" fill="#fff"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3 class="sidebar-title"><span class="sidebar-emoji">📂</span><span class="sidebar-text">Categorias</span></h3>
+                <button id="addCategoryBtn" class="btn-add-category" title="Adicionar categoria">➕</button>
+            </div>
+            <div class="categories" id="categoriesList">
+                
+            </div>
+            <div class="reorder-actions"></div>
+        </aside>
+
+        
+        <main class="main-content">
+            
+            <section id="documentos" class="content-section active">
+                <div class="section-header">
+                    <!-- Título removido conforme solicitado -->
+                </div>
+
+                <div class="search-header">
+                    <div class="search-container">
+                            <input type="text" id="searchInput" class="search-input" placeholder="🔍 Pesquise por tags...">
+                            <div class="search-actions">
+                                <button id="reorderDocsBtn" class="btn-secondary" title="Reordenar documentações">✏️</button>
+                                <button id="quickAddDocBtn" class="btn-primary btn-small">➕ Nova Documentação</button>
+                            </div>
+                    </div>
+                    
+                </div>
+
+                <div class="docs-container cards-view">
+                    
+                </div>
+
+                <div id="noResults" class="no-results" style="display: none;">
+                    <p>❌ Nenhuma documentação encontrada</p>
+                    <p class="small">Crie sua primeira documentação clicando no botão "Nova Documentação"</p>
+                </div>
+            </section>
+
+            
+            
+
+            
+            <section id="exemplos" class="content-section">
+                <div class="section-header">
+                    <h2>📌 Exemplos Reais</h2>
+                    <button id="quickAddExemploBtn" class="btn-primary">➕ Novo Exemplo</button>
+                </div>
+                <p class="section-subtitle">Exemplos práticos de situações reais</p>
+                
+                <div class="exemplos-container">
+                    
+                </div>
+
+                <div id="noExemplos" class="no-results" style="display: none;">
+                    <p>❌ Nenhum exemplo ainda</p>
+                </div>
+            </section>
+
+            
+            <section id="adicionar" class="content-section">
+                <h2>Nova Documentação</h2>
+                
+                <form id="docForm" class="form-container">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="docTitle">Título *</label>
+                            <input type="text" id="docTitle" required placeholder="Ex: Como resolver problema XYZ">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="docCategory">Documentação *</label>
+                            <div class="category-select-wrapper">
+                                <select id="docCategory" required>
+                                    <option value="">Selecione uma categoria</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="docDescription">Resumo/Descrição Breve *</label>
+                        <input type="text" id="docDescription" required placeholder="Uma linha resumida do que se trata" maxlength="100">
+                        <div class="char-counter" id="docDescriptionCounter">0/100</div>
+                    </div>
+
+                    <div class="form-group" id="docTypeGroup">
+                        <label for="docType">Tipo de Documentação</label>
+                        <select id="docType">
+                            <option value="normal" selected>📄 Documentação Normal</option>
+                            <option value="passo-a-passo">👣 Passo a Passo</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="docContentGroup">
+                        <button id="fullscreenBackBtn" class="btn-back-fullscreen" style="display: none;">⬅️ Voltar</button>
+                        <label>Conteúdo Completo *</label>
+                        <div class="editor-toolbar">
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
+                            <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
+                            <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
+                            <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
+                            <span class="editor-divider"></span>
+                            <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
+                            <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
+                            <span class="editor-divider"></span>
+                            <input type="file" id="docEditorImageInput" accept="image/*" style="display: none;">
+                            <button type="button" class="editor-btn" id="docEditorImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
+                            <span class="editor-divider"></span>
+                            <button type="button" class="editor-btn" id="fullscreenAddToolbarBtn" title="Tela Grande">🖥️</button>
+                        </div>
+                        <div id="docContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva o conteúdo aqui. Use os botões para formatar. Inserir imagens no meio do texto..."></div>
+                    </div>
+
+                    <div class="form-group" id="docPassoGroup" style="display: none;">
+                        <button id="fullscreenBackBtnPasso" class="btn-back-fullscreen" style="display: none;">⬅️ Voltar</button>
+                        <label>Conteúdo Passo a Passo</label>
+                        <div class="editor-toolbar">
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
+                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
+                            <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
+                            <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
+                            <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
+                            <span class="editor-divider"></span>
+                            <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
+                            <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
+                            <span class="editor-divider"></span>
+                            <input type="file" id="docPassoEditorImageInput" accept="image/*" style="display: none;">
+                            <button type="button" class="editor-btn" id="docPassoImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
+                            <span class="editor-divider"></span>
+                            <button type="button" class="editor-btn" id="fullscreenAddToolbarBtnPasso" title="Tela Grande">🖥️</button>
+                        </div>
+                        <div id="docPassoContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva os passos..."></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="docTags">Tags (separadas por vírgula)</label>
+                        <input type="text" id="docTags" placeholder="Ex: importante, urgente, relacionado">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">💾 Salvar Documentação</button>
+                        <button type="button" id="sendAddToChatBtn" class="btn-secondary" title="Chat IA">🤖</button>
+                    </div>
+                </form>
+            </section>
+
+            
+            <section id="chat" class="content-section">
+                
+                <div class="chat-wrapper">
+                    <div class="chat-container">
+                        <div class="chat-controls" style="padding:0.75rem 1.25rem; border-bottom:1px solid var(--border-color); background:var(--surface); display:flex; gap:1rem; align-items:center;">
+                            <!-- chat controls (kept empty to maximize vertical space); banner is managed by JS -->
+                        </div>
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-message bot">
+                                <div class="message-content">
+                                    <p>Olá! 👋 Sou seu assistente de IA. Faça perguntas sobre suas documentações, peça resumos ou ajuda na busca de informações. Como posso ajudá-lo?</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="input-wrapper">
+                                <textarea id="chatInput" class="chat-input" placeholder="Digite sua mensagem..." rows="3" aria-label="Mensagem para o Chat IA"></textarea>
+                                <button id="chatSendBtn" class="btn-send-chat">Enviar</button>
+                            </div>
+                            <!-- dica removida conforme solicitado -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            
+            <!-- Configurações removidas conforme solicitação do usuário -->
+        </main>
+    </div>
+
+    
+    <div id="docModal" class="modal">
+        <div class="modal-content modal-fullscreen">
+            <div class="modal-header-top">
+                <button id="editDocBtn" class="btn-secondary btn-edit-top">✏️ Editar</button>
+                <button id="fullscreenDocBtn" class="btn-secondary btn-edit-top">🖥️ Tela Cheia</button>
+                <span class="close-modal-top">&times;</span>
+            </div>
+            <div class="modal-header">
+                <h2 id="modalTitle"></h2>
+            </div>
+            <div class="modal-version-toggle" id="modalVersionToggle" style="display: none; margin-bottom: 12px;">
+                <button class="version-btn active" data-version="normal">📄 Normal</button>
+                <button class="version-btn" data-version="passo">👣 Passo a Passo</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalContent" class="modal-text-content"></div>
+
+                <div id="attachmentsSection" class="attachments-section" style="display: none;">
+                    <h4>📎 Anexos</h4>
+                    <div id="modalAttachments"></div>
+                </div>
+
+                <div id="tagsSection" class="tags-section" style="display: none;">
+                    <h4>🏷️ Tags</h4>
+                    <div id="modalTags"></div>
+                    <div id="modalCategory" class="category-badge" style="margin-top: 0.5rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating AI Chat Button removed — IA acessível via botões de Criar/Editar -->
+
+    <!-- Settings Modal (lightweight) -->
+    <div id="settingsModal" class="modal" aria-hidden="true">
+        <div class="modal-content modal-small">
+            <div class="modal-header-top">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="settings-tab active" data-tab="ia">🤖 IA</button>
+                    <button class="settings-tab" data-tab="appearance">🎨 Aparência</button>
+                </div>
+                <button class="close-settings" aria-label="Fechar">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-panel" data-panel="ia">
+                    <div class="settings-option">
+                        <label for="aiApiKey">Chave da API OpenAI</label>
+                        <div style="display:flex;gap:8px;align-items:center;"><input type="password" id="aiApiKey" class="settings-input ai-key-input" placeholder="sk-..."> <button id="toggleAiKey" class="btn-secondary">Mostrar</button></div>
+                        <small>Sua chave é salva localmente no navegador.</small>
+                    </div>
+                    <div class="settings-option">
+                        <label for="aiModel">Modelo da IA</label>
+                        <select id="aiModel" class="settings-input">
+                            <option value="gpt-4">GPT-4</option>
+                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                        </select>
+                    </div>
+                    <div class="settings-option">
+                        <label for="aiPrompt">Prompt inicial / Instrução</label>
+                        <textarea id="aiPrompt" class="settings-input" rows="4" placeholder="Instruções iniciais para o assistente..."></textarea>
+                    </div>
+                    <div class="settings-option">
+                        <label>Prompts salvos</label>
+                        <div id="savedPromptsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input id="newPromptText" class="settings-input" placeholder="Novo prompt curto...">
+                            <button id="addPromptBtn" class="btn-wide btn-ghost">Adicionar</button>
+                        </div>
+                    </div>
+                    <div class="settings-actions" style="margin-top:6px;">
+                        <button id="saveAiBtn" class="btn-wide">Salvar IA</button>
+                    </div>
+                </div>
+                <div class="settings-panel" data-panel="appearance" style="display:none;">
+                    <div class="settings-option">
+                        <label class="checkbox-label"><input type="checkbox" id="darkMode"> <span>Modo Escuro</span></label>
+                    </div>
+                    <div class="settings-option">
+                        <label>Primária</label>
+                        <input type="color" id="uiPrimary" value="#6366f1">
+                    </div>
+                    <div class="settings-option">
+                        <label>Secundária</label>
+                        <input type="color" id="uiSecondary" value="#8b5cf6">
+                    </div>
+                    <div class="settings-option">
+                        <label>Fundo</label>
+                        <input type="color" id="uiBackground" value="#f9fafb">
+                    </div>
+                    <div class="settings-option">
+                        <label>Surface</label>
+                        <input type="color" id="uiSurface" value="#ffffff">
+                    </div>
+                    <div class="settings-option">
+                        <label>Texto</label>
+                        <input type="color" id="uiText" value="#1f2937">
+                    </div>
+                    <div class="settings-actions" style="margin-top:6px;">
+                        <button id="saveUiBtn" class="btn-wide">Salvar Aparência</button>
+                        <button id="resetUiBtn" class="btn-ghost">Resetar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="editModal" class="modal">
+        <div class="modal-content modal-content-large">
+            <div class="modal-header-top">
+                <span class="close-edit">⬅️ Voltar</span>
+                <span id="editContentType">Conteúdo Normal</span>
+                <h2>✏️ Editar Documentação</h2>
+            </div>
+            
+            <form id="editForm" class="form-container">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="editDocTitle">Título *</label>
+                        <input type="text" id="editDocTitle" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="editDocCategory">Categoria *</label>
+                        <div class="category-select-wrapper">
+                            <select id="editDocCategory" required>
+                                <option value="">Selecione uma categoria</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="editDocDescription">Descrição *</label>
+                    <input type="text" id="editDocDescription" required maxlength="100">
+                    <div class="char-counter" id="editDocDescriptionCounter">0/100</div>
+                </div>
+
+                <div class="edit-version-toggle" style="margin-bottom: 12px;">
+                    <button type="button" class="version-btn active" data-edit-version="normal">📄 Editar Normal</button>
+                    <button type="button" class="version-btn" data-edit-version="passo">👣 Editar Passo a Passo</button>
+                </div>
+
+                <div class="form-group" id="normalContentGroup">
+                    <div class="editor-toolbar">
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
+                        <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
+                        <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
+                        <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
+                        <span class="editor-divider"></span>
+                        <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
+                        <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
+                        <span class="editor-divider"></span>
+                        <input type="file" id="editDocEditorImageInput" accept="image/*" style="display: none;">
+                        <button type="button" class="editor-btn" id="editDocEditorImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
+                        <span class="editor-divider"></span>
+                        <button type="button" class="editor-btn" id="fullscreenEditToolbarBtn" title="Tela Grande">🖥️</button>
+                        
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
+                    </div>
+                    <div id="editDocContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva o conteúdo..."></div>
+                </div>
+
+                <div class="form-group" id="passoContentGroup" style="display: none;">
+                    <div class="editor-toolbar">
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
+                        <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
+                        <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
+                        <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
+                        <span class="editor-divider"></span>
+                        <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
+                        <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
+                        <span class="editor-divider"></span>
+                        <input type="file" id="editDocPassoImageInput" accept="image/*" style="display: none;">
+                        <button type="button" class="editor-btn" id="editDocPassoImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
+                        <span class="editor-divider"></span>
+                        <button type="button" class="editor-btn" id="fullscreenEditToolbarBtnPasso" title="Tela Grande">🖥️</button>
+                        
+                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
+                    </div>
+                    <div id="editDocPassoContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva os passos..."></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="editDocTags">Tags</label>
+                    <input type="text" id="editDocTags">
+                </div>
+
+                <div class="form-actions">
+                        <button type="submit" class="btn-primary">💾 Salvar Alterações</button>
+                        <button type="button" id="sendEditToChatBtn" class="btn-secondary" title="Chat IA">🤖</button>
+                        <button type="button" class="btn-danger delete-during-edit">🗑️ Deletar Documentação</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    
+    <div id="exemploModal" class="modal">
+        <div class="modal-content modal-content-large">
+            <span class="close-exemplo">&times;</span>
+            <h2>Adicionar/Editar Exemplo</h2>
+            
+            <form id="exemploForm" class="form-container">
+                <div class="form-group">
+                    <label for="exemploTitulo">Título do Exemplo *</label>
+                    <input type="text" id="exemploTitulo" required placeholder="Ex: Ticket #5234 - Erro ao fazer login">
+                </div>
+
+                <div class="form-group">
+                    <label for="exemploDescricao">Descrição da Situação *</label>
+                    <textarea id="exemploDescricao" required placeholder="Descreva o que aconteceu neste caso real..." rows="4"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="exemploSolucao">Solução Aplicada *</label>
+                    <textarea id="exemploSolucao" required placeholder="Como foi resolvido..." rows="5"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="exemploDetalhes">Detalhes Técnicos</label>
+                    <textarea id="exemploDetalhes" placeholder="Informações técnicas, código, logs, etc..." rows="6"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="exemploCriado">Data/Cliente/Referência</label>
+                    <input type="text" id="exemploCriado" placeholder="Ex: 10/12/2025 - Cliente XYZ">
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">💾 Salvar Exemplo</button>
+                    <button type="button" class="btn-secondary close-exemplo btn-cancel">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    
+    <div id="categoryModal" class="modal">
+        <div class="modal-content">
+            <h2 id="categoryModalTitle">Adicionar Categoria</h2>
+            
+            <form id="categoryForm" class="form-container">
+                <div class="form-group">
+                    <label for="categoryName">Nome da Categoria *</label>
+                    <input type="text" id="categoryName" required placeholder="Ex: Políticas, Procedimentos, Bugs...">
+                </div>
+
+                <div class="form-group">
+                    <label for="categoryIcon">Emoji/Ícone</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <input type="text" id="categoryIcon" placeholder="Ex: 📋" maxlength="2" value="📂" readonly style="width:64px;text-align:center;background:transparent;border:none;">
+                            <button type="button" id="toggleIconPaletteBtn" class="btn-secondary" style="padding:0.45rem 0.6rem;">Selecionar ícone</button>
+                        </div>
+                        
+                        <input type="hidden" id="editingCategoryId" value="">
+                </div>
+
+                
+
+                <div class="form-actions">
+                    <button id="categorySubmitBtn" type="submit" class="btn-primary">➕ Criar Categoria</button>
+                    <button type="button" class="btn-secondary close-category btn-cancel">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    
+    <!-- FAB openAiBtn removed — IA acessível via botões de Criar/Editar -->
+
+    
+    <div id="iconPopover" class="icon-popover" style="display:none; position:absolute; z-index:2100;">
+        <div class="icon-popover-grid">
+            <button type="button" class="icon-choice" data-value="📂">📂</button>
+            <button type="button" class="icon-choice" data-value="📋">📋</button>
+            <button type="button" class="icon-choice" data-value="🗂️">🗂️</button>
+            <button type="button" class="icon-choice" data-value="📁">📁</button>
+            <button type="button" class="icon-choice" data-value="🔖">🔖</button>
+            <button type="button" class="icon-choice" data-value="📎">📎</button>
+            <button type="button" class="icon-choice" data-value="📌">📌</button>
+            <button type="button" class="icon-choice" data-value="⚙️">⚙️</button>
+            <button type="button" class="icon-choice" data-value="🧩">🧩</button>
+            <button type="button" class="icon-choice" data-value="🔥">🔥</button>
+            <button type="button" class="icon-choice" data-value="✅">✅</button>
+        </div>
+    </div>
+
+    
+    <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
