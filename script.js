@@ -7,8 +7,22 @@ let currentSelectedCategory = 'todos';
 let currentViewVersion = 'normal';
 let currentEditVersion = 'normal';
 let currentDocFullscreen = false;
-let aiConfig = { apiKey: '', model: 'gpt-3.5-turbo' };
+let aiConfig = { apiKey: '', model: '' };
 const STORAGE_UI = 'dochub-ui-config';
+
+/*
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║ RASTREAMENTO DE MUDANÇAS - AVISO DE SAÍDA SEGURA                      ║
+  ╠═══════════════════════════════════════════════════════════════════════╣
+  ║ hasUnsavedChanges: boolean                                            ║
+  ║   - TRUE: User está editando/criando e há mudanças não salvas        ║
+  ║   - FALSE: Nada em edição ou já foi salvo                            ║
+  ║                                                                       ║
+  ║ Quando TRUE, evento 'beforeunload' avisa ao fechar a página          ║
+  ║ ALTERAR EM: adicionarDocumentacao(), salvarEdicao(), limpar ao sair  ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
+*/
+let hasUnsavedChanges = false;
 
 // apply UI config (colors) to CSS variables
 function applyUiConfig(conf) {
@@ -36,6 +50,8 @@ function saveUiConfig(conf) {
 let lastFocusedEditorId = null;
 let currentChatDocId = null; // quando chat for aberto a partir de uma doc específica
 let currentChatOrigin = null; // { type: 'edit'|'create', docId?: number }
+let previousSection = 'documentos'; // rastreia seção anterior antes de entrar em Chat
+let previousModalOpen = null; // rastreia qual modal estava aberto antes de entrar em Chat
 let categoriesLoadedFromStorage = false;
 let ordensSessao = {};
 let originalNavbarTitleText = null;
@@ -56,6 +72,45 @@ document.addEventListener('DOMContentLoaded', () => {
     atualizarStats();
     filtrarPorCategoria('todos');
     renderizarExemplos();
+    
+    // Icon Popover Initialization
+    const toggleBtn = document.getElementById('toggleIconPaletteBtn');
+    const popover = document.getElementById('iconPopover');
+
+    function closePopover() {
+        if (popover) popover.style.display = 'none';
+    }
+
+    if (toggleBtn && popover) {
+        toggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+
+            const rect = toggleBtn.getBoundingClientRect();
+            const bodyRect = document.body.getBoundingClientRect();
+
+            const left = rect.left + window.scrollX;
+            let top = rect.top + window.scrollY - 10; // tentar posicionar acima
+
+            popover.style.left = left + 'px';
+            popover.style.top = top + 'px';
+            popover.style.display = popover.style.display === 'none' ? 'block' : 'none';
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!toggleBtn.contains(e.target) && !popover.contains(e.target)) {
+                closePopover();
+            }
+        });
+    }
+});
+
+// Aviso de segurança ao sair da página com mudanças não salvas
+window.addEventListener('beforeunload', (e) => {
+    if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+    }
 });
 
 function setModalVisible(modalId, visible) {
@@ -64,10 +119,21 @@ function setModalVisible(modalId, visible) {
     if (visible) {
         modal.classList.add('show');
         document.body.classList.add('modal-open');
+        // Rastreia qual modal foi aberto (se não estamos no Chat)
+        const currentSection = document.querySelector('.content-section.active')?.id;
+        if (currentSection !== 'chat') {
+            previousModalOpen = modalId;
+        }
     } else {
         modal.classList.remove('show');
         const anyOpen = document.querySelectorAll('.modal.show').length > 0;
         if (!anyOpen) document.body.classList.remove('modal-open');
+        // Se está fechando para ir ao Chat, mantém o rastreamento
+        const nextSection = document.querySelector('.content-section.active')?.id;
+        // Só limpa se não estamos transitando para o chat
+        if (!anyOpen && previousModalOpen === modalId && nextSection !== 'chat') {
+            previousModalOpen = null;
+        }
     }
 }
 
@@ -183,6 +249,23 @@ function inicializarChat() {
         });
     }
 
+    // Botão de voltar do Chat IA
+    const chatBackBtn = document.getElementById('chatBackBtn');
+    if (chatBackBtn) {
+        chatBackBtn.addEventListener('click', () => {
+            // Se estava criando documentação, volta pra seção de criar
+            if (previousSection === 'adicionar') {
+                mudarSecao('adicionar');
+            } else {
+                // Se estava editando, volta pra documentos E restaura modal
+                mudarSecao('documentos');
+                if (previousModalOpen) {
+                    setModalVisible(previousModalOpen, true);
+                }
+            }
+        });
+    }
+
     // support floating AI button id variations
     const floating = document.getElementById('floatingAiButton') || document.getElementById('openAiBtn');
     if (floating) {
@@ -233,6 +316,9 @@ function appendChatMessage(role, content) {
     messages.push({ role, content, ts: Date.now() });
     saveChatHistory(messages);
     renderChatMessages(messages);
+    const container = document.getElementById('chatMessages');
+    if (!container) return null;
+    return container.lastChild;
 }
 
 function enviarMensagemChat() {
@@ -240,15 +326,84 @@ function enviarMensagemChat() {
     if (!input) return;
     const text = input.value.trim();
     if (!text) return;
-    // append user message
+    
+    // Verificar se tem API Key configurada
+    if (!aiConfig.apiKey) {
+        appendChatMessage('user', text);
+        appendChatMessage('bot', '❌ API Key não configurada. Acesse as configurações para adicionar sua chave de IA.');
+        input.value = '';
+        input.disabled = false;
+        return;
+    }
+
+    // Mostrar mensagem do usuário e loading
     appendChatMessage('user', text);
     input.value = '';
+    input.disabled = true;
+    const loadingEl = appendChatMessage('bot', '⏳ Pensando...') || null;
 
-    // mock IA response (replaceable by real API call if apiKey provided)
-    setTimeout(() => {
-        const reply = `IA: resumo rápido → ${text.slice(0, 200)}${text.length>200? '...':''}`;
-        appendChatMessage('bot', reply);
-    }, 700);
+    // timeout via AbortController
+    const controller = new AbortController();
+    const timeoutMs = 20000; // 20s timeout
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Fazer requisição ao backend Python com timeout
+    // Determinar modelo e provider (prefere configuração do aiConfig ou seleção atual)
+    const selectedModel = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+    // Determinar provider: preferir configuração salva, senão inferir pelo nome do modelo
+    let provider = aiConfig.provider || '';
+    if (!provider) {
+        const name = selectedModel.toLowerCase();
+        if (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) provider = 'genai';
+        else provider = 'openai';
+    }
+
+    fetch('http://localhost:5000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            api_key: aiConfig.apiKey,
+            model: selectedModel,
+            provider: provider,
+            message: text,
+            system_prompt: aiConfig.systemPrompt || 'Você é um assistente útil',
+            
+            max_tokens: aiConfig.maxTokens || 2000,
+            history: []
+        }),
+        signal: controller.signal
+    })
+    .then(res => {
+        clearTimeout(timeoutId);
+        return res.json();
+    })
+    .then(data => {
+        if (!loadingEl) {
+            // fallback: render new bot message
+            if (!data.success) appendChatMessage('bot', `❌ Erro: ${data.error}`);
+            else appendChatMessage('bot', renderMessageHTML(data.response));
+        } else {
+            if (!data.success) {
+                loadingEl.innerHTML = `<div class="message-content"><p>❌ Erro: ${data.error}</p></div>`;
+            } else {
+                loadingEl.innerHTML = `<div class="message-content"><p>${renderMessageHTML(data.response)}</p></div>`;
+            }
+        }
+        input.disabled = false;
+        input.focus();
+    })
+    .catch(err => {
+        const msg = err.name === 'AbortError' ?
+            'Tempo de resposta esgotado. Tente novamente.' :
+            `Erro de conexão: ${err.message}`;
+        if (loadingEl) {
+            loadingEl.innerHTML = `<div class="message-content"><p>❌ ${msg}<br><small>Verifique se o backend está rodando em http://localhost:5000</small></p></div>`;
+        } else {
+            appendChatMessage('bot', `❌ ${msg}`);
+        }
+        input.disabled = false;
+        input.focus();
+    });
 }
 
 function sendEditorContentToChat(editorId, options = { isEdit: false, isPasso: false, autoSend: true }) {
@@ -399,7 +554,7 @@ function salvarDados() {
     localStorage.setItem(STORAGE_CATEGORIAS, JSON.stringify(categorias));
     
     aiConfig.apiKey = document.getElementById('aiApiKey')?.value || '';
-    aiConfig.model = document.getElementById('aiModel')?.value || 'gpt-3.5-turbo';
+    aiConfig.model = document.getElementById('aiModel')?.value || document.querySelector('input[name="aiModel"]:checked')?.value || '';
     localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
 }
 
@@ -700,6 +855,25 @@ function inicializarEventos() {
     const docForm = document.getElementById('docForm');
     if (docForm) docForm.addEventListener('submit', adicionarDocumentacao);
 
+    // Botão de enviar para chat na seção de adicionar
+    const sendAddToChatBtn = document.getElementById('sendAddToChatBtn');
+    if (sendAddToChatBtn) {
+        sendAddToChatBtn.addEventListener('click', () => {
+            const editorId = document.getElementById('docType').value === 'passo-a-passo' ? 'docPassoContent' : 'docContent';
+            sendEditorContentToChat(editorId, { isEdit: false, isPasso: document.getElementById('docType').value === 'passo-a-passo', autoSend: true });
+        });
+    }
+
+    // Botão de enviar para chat na seção de editar
+    const sendEditToChatBtn = document.getElementById('sendEditToChatBtn');
+    if (sendEditToChatBtn) {
+        sendEditToChatBtn.addEventListener('click', () => {
+            const isPasso = currentEditVersion === 'passo-a-passo';
+            const editorId = isPasso ? 'editDocPassoContent' : 'editDocContent';
+            sendEditorContentToChat(editorId, { isEdit: true, isPasso: isPasso, autoSend: true });
+        });
+    }
+
     const docTypeSelect = document.getElementById('docType');
     if (docTypeSelect) {
         const docPassoGroup = document.getElementById('docPassoGroup');
@@ -802,37 +976,71 @@ function inicializarEventos() {
         });
     }
 
-    // settings modal tab switching and actions
-    document.querySelectorAll('.settings-tab').forEach(btn => btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.settings-tab').forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        const tab = btn.dataset.tab;
-        document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.style.display = p.dataset.panel === tab ? 'block' : 'none');
-    }));
+    // Settings do IA (modal exclusivo) - Navbar
+    const aiSettingsBtn = document.getElementById('aiSettingsBtn');
+    const aiSettingsModal = document.getElementById('aiSettingsModal');
+    const closeAiSettings = document.querySelector('.close-ai-settings');
 
-    document.getElementById('toggleAiKey')?.addEventListener('click', () => {
-        const k = document.getElementById('aiApiKey');
-        if (!k) return;
-        if (k.type === 'password') { k.type = 'text'; (document.getElementById('toggleAiKey')).textContent = 'Ocultar'; }
-        else { k.type = 'password'; (document.getElementById('toggleAiKey')).textContent = 'Mostrar'; }
+    if (aiSettingsBtn && aiSettingsModal) {
+        aiSettingsBtn.addEventListener('click', () => {
+            setModalVisible('aiSettingsModal', true);
+            carregarConfigsIA();
+        });
+    }
+
+    // Settings do IA (modal exclusivo) - Botão do Chat
+    const chatSettingsBtn = document.getElementById('chatSettingsBtn');
+    if (chatSettingsBtn && aiSettingsModal) {
+        chatSettingsBtn.addEventListener('click', () => {
+            setModalVisible('aiSettingsModal', true);
+            carregarConfigsIA();
+        });
+    }
+
+    if (closeAiSettings && aiSettingsModal) {
+        closeAiSettings.addEventListener('click', () => setModalVisible('aiSettingsModal', false));
+    }
+
+    if (aiSettingsModal) {
+        window.addEventListener('click', (e) => {
+            if (e.target === aiSettingsModal) setModalVisible('aiSettingsModal', false);
+        });
+    }
+
+    // Sistema de abas do modal de IA
+    document.querySelectorAll('.ai-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabName = btn.dataset.tab;
+            
+            // Desativar todas as abas
+            document.querySelectorAll('.ai-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ai-tab-content').forEach(c => c.classList.remove('active'));
+            
+            // Ativar aba selecionada
+            btn.classList.add('active');
+            const tabContent = document.querySelector(`.ai-tab-content[data-tab="${tabName}"]`);
+            if (tabContent) tabContent.classList.add('active');
+        });
     });
 
-    document.getElementById('addPromptBtn')?.addEventListener('click', () => {
-        const txt = document.getElementById('newPromptText');
-        if (!txt || !txt.value.trim()) return;
-        aiConfig.prompts = aiConfig.prompts || [];
-        aiConfig.prompts.push(txt.value.trim());
-        txt.value = '';
-        saveAiConfig();
-        populateSavedPrompts();
-    });
+    // Botões de salvar das abas
+    document.getElementById('saveSystemPromptBtn')?.addEventListener('click', salvarSystemPrompt);
+    document.getElementById('resetSystemPromptBtn')?.addEventListener('click', restaurarSystemPromptPadrao);
+    document.getElementById('saveApiSettingsBtn')?.addEventListener('click', salvarConfigsIA);
+    document.getElementById('validateApiKeyBtn')?.addEventListener('click', validarApiKey);
+    document.getElementById('runConnectionTestBtn')?.addEventListener('click', testarConexaoIA);
 
-    document.getElementById('saveAiBtn')?.addEventListener('click', () => {
-        aiConfig.apiKey = document.getElementById('aiApiKey')?.value || '';
-        aiConfig.model = document.getElementById('aiModel')?.value || aiConfig.model;
-        aiConfig.prompt = document.getElementById('aiPrompt')?.value || '';
-        saveAiConfig();
-        showToast('✅ Configurações de IA salvas', 'success');
+    // Toggle visibilidade da API Key
+    // Visibilidade de API Key removida conforme solicitação (sem botões de mostrar/ocultar)
+
+    // Controle de temperatura removido da UI
+
+    // Botão de limpar chat
+    document.getElementById('clearChatBtn')?.addEventListener('click', limparChat);
+
+    // Salvar configurações de IA
+    document.getElementById('saveAiSettingsBtn')?.addEventListener('click', () => {
+        salvarConfigsIA();
     });
 
     document.getElementById('saveUiBtn')?.addEventListener('click', () => {
@@ -870,15 +1078,7 @@ function inicializarEventos() {
 
     // populate settings modal fields from storage
     function populateSettingsModal(){
-        try {
-            const ai = localStorage.getItem(STORAGE_AI);
-            if (ai) aiConfig = JSON.parse(ai);
-        } catch(e){}
-        document.getElementById('aiApiKey').value = aiConfig.apiKey || '';
-        document.getElementById('aiModel').value = aiConfig.model || aiConfig.model;
-        document.getElementById('aiPrompt').value = aiConfig.prompt || (aiConfig.prompts && aiConfig.prompts[0]) || '';
-        populateSavedPrompts();
-
+        // Carregar configurações de UI
         const ui = loadUiConfig();
         if (ui) {
             document.getElementById('uiPrimary').value = ui.primary || '#6366f1';
@@ -886,6 +1086,318 @@ function inicializarEventos() {
             document.getElementById('uiBackground').value = ui.background || '#f9fafb';
             document.getElementById('uiSurface').value = ui.surface || '#ffffff';
             document.getElementById('uiText').value = ui.text || '#1f2937';
+        }
+    }
+
+    // Carregar configurações de IA para o modal exclusivo
+    function carregarConfigsIA() {
+        try {
+            const ai = localStorage.getItem(STORAGE_AI);
+            if (ai) aiConfig = JSON.parse(ai);
+        } catch(e){}
+        
+        document.getElementById('aiApiKey').value = aiConfig.apiKey || '';
+        document.getElementById('aiModel').value = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        document.getElementById('aiSystemPrompt').value = aiConfig.systemPrompt || 'Você é um assistente de IA útil, preciso e respeitoso. Responda em português. Seja conciso mas informativo.';
+        document.getElementById('aiMaxTokens').value = aiConfig.maxTokens || 2000;
+        
+        // Selecionar modelo
+        const modelRadios = document.querySelectorAll('input[name="aiModel"]');
+        const defaultSelection = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        modelRadios.forEach(radio => {
+            if (radio.value === defaultSelection) {
+                radio.checked = true;
+            }
+        });
+    }
+
+    // Função de label de temperatura removida (controle de temperatura foi retirado da UI)
+
+    // Validar API Key
+    function validarApiKey() {
+        const apiKey = document.getElementById('aiApiKey').value.trim();
+        const badge = document.getElementById('apiKeyStatusBadge');
+        const btn = document.getElementById('validateApiKeyBtn');
+
+        if (!apiKey) {
+            badge.classList.remove('valid');
+            badge.textContent = '❌ API Key não foi preenchida';
+            badge.style.display = 'block';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Validando...';
+
+        // Detect provider: respeitar aiConfig.provider ou inferir pelo modelo selecionado
+        const selectedModel = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        let provider = aiConfig.provider || '';
+        if (!provider) {
+            const name = (selectedModel || '').toLowerCase();
+            if (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) provider = 'genai';
+            else provider = 'openai';
+        }
+        const modelForTest = selectedModel || (provider === 'genai' ? 'gemma-3-27b-it' : 'gpt-3.5-turbo');
+
+        // Fazer requisição ao backend para validar (rota /validate)
+        fetch('http://localhost:5000/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey, model: modelForTest, provider: provider })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.valid) {
+                badge.classList.add('valid');
+                badge.textContent = '✅ API Key válida! Pronta para usar.';
+            } else {
+                badge.classList.remove('valid');
+                badge.textContent = '❌ API Key inválida ou expirada: ' + (data.error || 'verifique a chave');
+            }
+            badge.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = '🔍 Validar Chave';
+        })
+        .catch(err => {
+            badge.classList.remove('valid');
+            badge.textContent = '❌ Erro ao validar: ' + err.message;
+            badge.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = '🔍 Validar Chave';
+        });
+    }
+
+    // Verificar se servidor está online
+    function verificarServerOnline(tentativas = 0) {
+        return fetch('http://localhost:5000/health', { method: 'GET' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'online') {
+                    return true;
+                }
+                throw new Error('Server not responding');
+            })
+            .catch(err => {
+                if (tentativas < 5) {
+                    return new Promise(resolve => {
+                        setTimeout(() => resolve(verificarServerOnline(tentativas + 1)), 1000);
+                    });
+                } else {
+                    return false;
+                }
+            });
+    }
+
+    // Função para executar teste dos modelos
+    function executarTesteModelos(apiKey, status, results, btn, provider) {
+        let modeloFuncional = null;
+        let providerFuncional = null;
+
+        function testarModelo(modelo, prov) {
+            return fetch('http://localhost:5000/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: apiKey, model: modelo, provider: prov })
+            }).then(res => res.json()).then(validationData => {
+                document.getElementById('testConnectionMessage').textContent = `Testando ${modelo} (${prov})...`;
+                if (validationData && validationData.valid) {
+                    modeloFuncional = modelo;
+                    providerFuncional = prov;
+                    return true;
+                }
+                return false;
+            }).catch(() => false);
+        }
+
+        (async () => {
+            const selected = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+
+            const providersToTry = provider ? [provider] : ['openai', 'genai'];
+
+            for (const prov of providersToTry) {
+                let modelos = [];
+                if (selected) modelos = [selected];
+                else if (prov === 'genai') modelos = ['gemma-3-27b-it', 'gemma-3-12b', 'gemini-1.5'];
+                else modelos = ['gpt-4', 'gpt-3.5-turbo'];
+
+                for (const modelo of modelos) {
+                    const ok = await testarModelo(modelo, prov);
+                    if (ok) break;
+                }
+
+                if (modeloFuncional) break;
+            }
+
+            document.getElementById('testConnectionMessage').textContent = '✅ Teste concluído!';
+
+            if (modeloFuncional) {
+                results.innerHTML = `
+                    <div style="color: #22c55e;">
+                        <h5 style="margin: 0 0 12px 0;">✅ API Key Válida!</h5>
+                        <div style="background: rgba(34, 197, 94, 0.1); padding: 10px; border-radius: 4px; margin-bottom: 12px;">
+                            <p style="margin: 4px 0; font-weight: 600;">🎉 Provider:</p>
+                            <p style="margin: 4px 0; font-size: 1.05rem; font-weight: 700; color: var(--primary-color);">${providerFuncional} — ${modeloFuncional}</p>
+                        </div>
+                        <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);">Sua chave está ativa e funcionando!</p>
+                    </div>
+                `;
+
+                results.style.display = 'block';
+                document.getElementById('aiApiKey').value = apiKey;
+                const radio = document.querySelector(`input[name="aiModel"][value="${modeloFuncional}"]`);
+                if (radio) radio.checked = true;
+                aiConfig.apiKey = apiKey;
+                aiConfig.model = modeloFuncional;
+                aiConfig.provider = providerFuncional;
+                localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+
+                showToast(`✅ Configurado! Provider: ${providerFuncional}`, 'success');
+            } else {
+                results.innerHTML = `
+                    <div style="color: #ef4444;">
+                        <h5 style="margin: 0 0 12px 0;">❌ API Key Inválida</h5>
+                        <p style="margin: 8px 0; font-size: 0.85rem;">Verifique se a chave está correta e ainda é válida.</p>
+                    </div>
+                `;
+                results.style.display = 'block';
+                showToast('❌ API Key inválida - verifique e tente novamente', 'error');
+            }
+
+            btn.disabled = false;
+            btn.textContent = '🚀 Testar Automaticamente';
+        })();
+    }
+    function testarConexaoIA() {
+        const apiKey = document.getElementById('testApiKey').value.trim();
+        const status = document.getElementById('testConnectionStatus');
+        const results = document.getElementById('testResults');
+        const btn = document.getElementById('runConnectionTestBtn');
+
+        if (!apiKey) {
+            showToast('❌ Preencha a API Key para testar', 'error');
+            return;
+        }
+
+        // aceitar chaves de outros provedores (não exigir prefixo sk-)
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Verificando servidor...';
+        status.style.display = 'block';
+        status.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 16px; height: 16px; border: 2px solid var(--primary-color); border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <div id="testConnectionMessage" style="font-weight: 600; color: var(--primary-color);">⏳ Verificando servidor...</div>
+            </div>
+            <style>
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+            </style>
+        `;
+        results.style.display = 'none';
+
+        // Verificar se servidor está online
+        verificarServerOnline()
+            .then(serverOnline => {
+                if (!serverOnline) {
+                    // Servidor não está respondendo
+                    btn.disabled = false;
+                    btn.textContent = '🚀 Testar Automaticamente';
+                    
+                    status.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 24px;">❌</span>
+                            <div id="testConnectionMessage" style="font-weight: 600; color: #ef4444;">
+                                Servidor não encontrado
+                            </div>
+                        </div>
+                    `;
+
+                    results.innerHTML = `
+                        <div style="color: #ef4444;">
+                            <h5 style="margin: 0 0 12px 0;">❌ Servidor não está rodando</h5>
+                            <p style="margin: 8px 0; font-weight: 600;">Execute o arquivo para iniciar:</p>
+                            
+                            <div style="background: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 4px; margin: 12px 0; font-family: monospace; font-size: 0.9rem;">
+                                <p style="margin: 4px 0; color: #22c55e;">👉 IA/iniciar.bat</p>
+                            </div>
+
+                            <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-secondary);">
+                                Após executar, volte aqui e clique em "Testar Automaticamente" novamente.
+                            </p>
+                        </div>
+                    `;
+                    results.style.display = 'block';
+                    showToast('❌ Execute IA/iniciar.bat para iniciar o servidor', 'error');
+                    return;
+                }
+
+                // Servidor está online! Proceder com o teste
+                status.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 24px;">✅</span>
+                        <div id="testConnectionMessage" style="font-weight: 600; color: #22c55e;">
+                            Servidor online! Testando modelos...
+                        </div>
+                    </div>
+                `;
+
+                executarTesteModelos(apiKey, status, results, btn);
+            });
+    }
+
+    // Salvar configurações de IA
+    function salvarConfigsIA() {
+        const apiKey = document.getElementById('aiApiKey').value.trim();
+        const model = document.querySelector('input[name="aiModel"]:checked')?.value || '';
+
+        if (!apiKey) {
+            showToast('❌ Preencha a chave de API', 'error');
+            return;
+        }
+
+        aiConfig.apiKey = apiKey;
+        aiConfig.model = model;
+        
+
+        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+        showToast('✅ Configurações de API salvas!', 'success');
+    }
+
+    // Salvar System Prompt
+    function salvarSystemPrompt() {
+        const systemPrompt = document.getElementById('aiSystemPrompt').value.trim();
+        const maxTokens = parseInt(document.getElementById('aiMaxTokens').value) || 2000;
+
+        if (!systemPrompt) {
+            showToast('❌ System Prompt não pode estar vazio', 'error');
+            return;
+        }
+
+        aiConfig.systemPrompt = systemPrompt;
+        aiConfig.maxTokens = maxTokens;
+
+        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+        showToast('✅ System Prompt salvo!', 'success');
+    }
+
+    // Restaurar System Prompt padrão
+    function restaurarSystemPromptPadrao() {
+        const padrao = 'Você é um assistente de IA útil, preciso e respeitoso. Responda em português. Seja conciso mas informativo.';
+        document.getElementById('aiSystemPrompt').value = padrao;
+        aiConfig.systemPrompt = padrao;
+        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+        showToast('✅ System Prompt restaurado ao padrão', 'success');
+    }
+
+    // Limpar chat
+    function limparChat() {
+        if (confirm('Tem certeza que deseja limpar todo o histórico do chat?')) {
+            const chatMessages = document.getElementById('chatMessages');
+            if (chatMessages) {
+                chatMessages.innerHTML = '<div class="chat-message bot"><div class="message-content"><p>Olá! 👋 Sou seu assistente de IA. Como posso ajudá-lo?</p></div></div>';
+            }
+            showToast('✅ Chat limpo', 'success');
         }
     }
 
@@ -1791,10 +2303,6 @@ function fecharModalsEventos() {
 
     if (closeTopBtns && closeTopBtns.length > 0) {
         closeTopBtns.forEach(cb => cb.addEventListener('click', () => {
-            const modalContent = document.querySelector('#docModal .modal-content');
-            modalContent.classList.remove('modal-fullscreen');
-            const fullscreenBtn = document.getElementById('fullscreenDocBtn');
-            if (fullscreenBtn) fullscreenBtn.textContent = '🖥️ Tela Cheia';
             setModalVisible('docModal', false);
         }));
     }
@@ -1803,18 +2311,6 @@ function fecharModalsEventos() {
     if (docModal) {
         window.addEventListener('click', (e) => {
             if (e.target === docModal) setModalVisible('docModal', false);
-
-            const fullscreenBtn = document.getElementById('fullscreenDocBtn');
-            const modalContent = docModal.querySelector('.modal-content');
-    
-                if (fullscreenBtn) {
-                    fullscreenBtn.addEventListener('click', () => {
-                        modalContent.classList.toggle('modal-fullscreen');
-                        const isFullscreen = modalContent.classList.contains('modal-fullscreen');
-                        fullscreenBtn.textContent = isFullscreen ? '🔽 Sair Tela Cheia' : '🖥️ Tela Cheia';
-                        currentDocFullscreen = isFullscreen;
-                    });
-                }
         });
     }
 
@@ -1881,10 +2377,6 @@ function fecharModalsEventos() {
             // Sempre voltar para modo normal (não tela cheia)
             const docModalContent = document.querySelector('#docModal .modal-content');
             docModalContent.classList.remove('modal-fullscreen');
-            const docFullscreenBtn = document.getElementById('fullscreenDocBtn');
-            if (docFullscreenBtn) {
-                docFullscreenBtn.textContent = '🖥️ Tela Cheia';
-            }
             currentDocFullscreen = false;
 
             if (reorderingMode) {
@@ -2370,7 +2862,10 @@ function inicializarRichEditor() {
     document.querySelectorAll('.rich-editor').forEach(editor => {
         const toolbar = editor.previousElementSibling;
         if (toolbar && toolbar.classList.contains('editor-toolbar')) {
-            editor.addEventListener('input', () => updateToolbarButtons(toolbar, editor));
+            editor.addEventListener('input', () => {
+                updateToolbarButtons(toolbar, editor);
+                hasUnsavedChanges = true;
+            });
             editor.addEventListener('keyup', () => updateToolbarButtons(toolbar, editor));
             editor.addEventListener('mouseup', () => updateToolbarButtons(toolbar, editor));
             editor.addEventListener('focus', () => { updateToolbarButtons(toolbar, editor); lastFocusedEditorId = editor.id; });
@@ -2384,6 +2879,7 @@ function inicializarRichEditor() {
     // cleanup temporary zero-width placeholders inserted when toggling off headings
     document.querySelectorAll('.rich-editor').forEach(editor => {
         editor.addEventListener('input', (e) => {
+            hasUnsavedChanges = true;
             try {
                 if (editor.dataset && editor.dataset.tempZw) {
                     // remove text nodes that contain only the zero-width char
@@ -2735,34 +3231,74 @@ function inserirImagemNoEditor(files, editorId) {
     });
 }
 
+/*
+  ╔════════════════════════════════════════════════════════════════════════════╗
+  ║ DOCUMENTAÇÃO DE PROBLEMA CRÍTICO - TELA BRANCA                            ║
+  ╠════════════════════════════════════════════════════════════════════════════╣
+  ║ PROBLEMA:                                                                  ║
+  ║ Se a função mudarSecao() tiver código orfão (código fora de chaves {}),   ║
+  ║ o JavaScript para de funcionar e exibe tela branca.                       ║
+  ║                                                                            ║
+  ║ CAUSA COMUM:                                                              ║
+  ║ - Edição incompleta da função (deletar linhas sem fechar chaves)         ║
+  ║ - Deixar código solto sem estar dentro da função                         ║
+  ║                                                                            ║
+  ║ SOLUÇÃO:                                                                   ║
+  ║ - Verificar que a função SEMPRE termina com }                            ║
+  ║ - Não deixar código HTML/JS solto fora da função                         ║
+  ║ - Usar console.log() para verificar erros (F12 > Console)                ║
+  ║                                                                            ║
+  ║ ESTRUTURA CORRETA:                                                         ║
+  ║ function mudarSecao(secao) {                                              ║
+  ║     // ... código aqui ...                                               ║
+  ║     toggleAddFieldsVisibility(false);                                    ║
+  ║ } // <-- ESTA CHAVE FECHA A FUNÇÃO - ESSENCIAL!                         ║
+  ╚════════════════════════════════════════════════════════════════════════════╝
+*/
+
 function mudarSecao(secao) {
+    // Rastreia seção anterior (só se não é 'chat')
+    const currentSection = document.querySelector('.content-section.active')?.id;
+    if (currentSection && currentSection !== 'chat') {
+        previousSection = currentSection;
+    }
+
     document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
     document.querySelector(`[data-section="${secao}"]`)?.classList.add('active');
 
     document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
     document.getElementById(secao)?.classList.add('active');
 
-    // Hide top nav menu while inside chat for a focused view
-    try {
-        const navMenu = document.querySelector('.nav-menu');
-        const navbarTitleEl = document.querySelector('.navbar-title');
-        const logoIconEl = document.querySelector('.logo-icon');
+    // Gerenciar elementos quando entra/sai do Chat
+    const sidebar = document.querySelector('.sidebar');
+    const settingsBtn = document.getElementById('topSettingsBtn');
+    const aiSettingsBtn = document.getElementById('aiSettingsBtn');
+    const chatBackBtn = document.getElementById('chatBackBtn');
+    const navbarChatInfo = document.getElementById('navbarChatInfo');
+    const navbarLogo = document.querySelector('.navbar-logo');
+    const navMenu = document.querySelector('.nav-menu');
+    const editModal = document.getElementById('editModal');
 
-        if (secao === 'chat') {
-            if (navMenu) navMenu.style.display = 'none';
-            // store originals
-            if (navbarTitleEl && originalNavbarTitleText === null) originalNavbarTitleText = navbarTitleEl.textContent;
-            if (logoIconEl && originalLogoIconText === null) originalLogoIconText = logoIconEl.textContent;
-            // set chat branding
-
-            if (logoIconEl) logoIconEl.textContent = '🤖';
-        } else {
-            if (navMenu) navMenu.style.display = '';
-            // restore originals when leaving chat
-            if (navbarTitleEl && originalNavbarTitleText !== null) navbarTitleEl.textContent = originalNavbarTitleText;
-            if (logoIconEl && originalLogoIconText !== null) logoIconEl.textContent = originalLogoIconText;
-        }
-    } catch (e) {}
+    if (secao === 'chat') {
+        // Fechar modal de edição ao entrar em Chat IA
+        if (editModal) setModalVisible('editModal', false);
+        
+        if (sidebar) sidebar.style.display = 'none';
+        if (settingsBtn) settingsBtn.style.display = 'none';
+        if (aiSettingsBtn) aiSettingsBtn.style.display = 'flex';
+        if (chatBackBtn) chatBackBtn.style.display = 'flex';
+        if (navbarChatInfo) navbarChatInfo.style.display = 'flex';
+        if (navbarLogo) navbarLogo.style.display = 'none';
+        if (navMenu) navMenu.style.display = 'none';
+    } else {
+        if (sidebar) sidebar.style.display = '';
+        if (settingsBtn) settingsBtn.style.display = '';
+        if (aiSettingsBtn) aiSettingsBtn.style.display = 'none';
+        if (chatBackBtn) chatBackBtn.style.display = 'none';
+        if (navbarChatInfo) navbarChatInfo.style.display = 'none';
+        if (navbarLogo) navbarLogo.style.display = '';
+        if (navMenu) navMenu.style.display = '';
+    }
 
     // If opening chat, inject a top bar (outside the chat input) with a back button and scope text
     try {
@@ -2923,7 +3459,8 @@ function adicionarDocumentacao(e) {
     renderizarDocumentacoes(documentacoes);
     document.getElementById('docForm').reset();
     document.getElementById('docContent').innerHTML = '';
-    if (document.getElementById('docPassoContent')) document.getElementById('docPassoContent').innerHTML = '';
+    if (document.getElementById('docPassoContent') ) document.getElementById('docPassoContent').innerHTML = '';
+    hasUnsavedChanges = false;
     mudarSecao('documentos');
     filtrarPorCategoria(currentSelectedCategory);
     atualizarStats();
@@ -3256,6 +3793,7 @@ function salvarEdicao(e) {
     doc.dataAtualizacao = new Date().toLocaleDateString('pt-BR');
 
     salvarDados();
+    hasUnsavedChanges = false;
     // Atualizar UI imediatamente
     atualizarSelectsCategorias();
     renderizarDocumentacoes(documentacoes);
@@ -3595,5 +4133,3 @@ function renderMessageHTML(text) {
     const safe = escapeHtml(String(text || ''));
     return safe.replace(/\n/g, '<br>');
 }
-
-// chat helper functions removed

@@ -25,6 +25,12 @@
     
     <nav class="navbar">
         <div class="navbar-container">
+            <button id="chatBackBtn" class="btn-chat-back" title="Voltar para Documentos" aria-label="Voltar" style="display: none;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Voltar</span>
+            </button>
             <div class="navbar-logo">
                 <span class="logo-icon">📚</span>
                 <h1 class="navbar-title">DocHub</h1>
@@ -33,7 +39,16 @@
                 <li><a href="#" data-section="documentos" class="nav-link active">📄 Documentos</a></li>
                 <li><a href="#" data-section="exemplos" class="nav-link">📌 Exemplos</a></li>
             </ul>
+            <div class="navbar-chat-info" id="navbarChatInfo" style="display: none; text-align: center; flex: 1;">
+                <h2 style="margin: 0; font-size: 1.3rem; font-weight: 700; color: var(--primary-color);">🤖 Chat IA</h2>
+            </div>
             <div class="top-actions">
+                <button id="aiSettingsBtn" class="btn-settings btn-ai-settings" title="Configurações de IA" aria-label="Configurações de IA" style="display: none;">
+                    <!-- AI settings icon -->
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="#fff"/>
+                    </svg>
+                </button>
                 <button id="topSettingsBtn" class="btn-settings" title="Configurações" aria-label="Configurações">
                     <!-- polished SVG gear -->
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -203,8 +218,17 @@
                 
                 <div class="chat-wrapper">
                     <div class="chat-container">
-                        <div class="chat-controls" style="padding:0.75rem 1.25rem; border-bottom:1px solid var(--border-color); background:var(--surface); display:flex; gap:1rem; align-items:center;">
-                            <!-- chat controls (kept empty to maximize vertical space); banner is managed by JS -->
+                        <div class="chat-controls" style="padding:0.75rem 1.25rem; border-bottom:1px solid var(--border-color); background:var(--surface); display:flex; gap:1rem; align-items:center; justify-content: space-between;">
+                            <h2 style="margin:0; font-size:1.2rem; font-weight:600; color:var(--primary-color);">💬 Chat IA</h2>
+                            <div style="display: flex; gap: 10px;">
+                                <button id="clearChatBtn" class="btn-small" title="Limpar histórico do chat" aria-label="Limpar chat">🗑️ Limpar</button>
+                                <button id="chatSettingsBtn" class="btn-chat-settings" title="Configurações do Chat IA" aria-label="Configurações do Chat IA">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" fill="currentColor" />
+                                        <path d="M19.4 13.1c.04-.36.06-.73.06-1.11s-.02-.75-.06-1.11l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.07 7.07 0 0 0-1.9-1.1l-.38-2.65A.5.5 0 0 0 12.6 2h-3a.5.5 0 0 0-.5.42l-.38 2.66a7.07 7.07 0 0 0-1.9 1.1l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.5 10.9c-.04.36-.06.73-.06 1.11s.02.75.06 1.11L2.39 14.87a.5.5 0 0 0-.12.64l2 3.46c.14.24.43.34.68.24l2.49-1c.6.48 1.26.87 1.95 1.16l.38 2.66c.05.26.27.44.52.44h3c.25 0 .47-.18.52-.44l.38-2.66c.7-.29 1.35-.68 1.95-1.16l2.49 1c.25.1.54 0 .68-.24l2-3.46a.5.5 0 0 0-.12-.64L19.4 13.1z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="chat-messages" id="chatMessages">
                             <div class="chat-message bot">
@@ -234,7 +258,6 @@
         <div class="modal-content modal-fullscreen">
             <div class="modal-header-top">
                 <button id="editDocBtn" class="btn-secondary btn-edit-top">✏️ Editar</button>
-                <button id="fullscreenDocBtn" class="btn-secondary btn-edit-top">🖥️ Tela Cheia</button>
                 <span class="close-modal-top">&times;</span>
             </div>
             <div class="modal-header">
@@ -268,42 +291,13 @@
         <div class="modal-content modal-small">
             <div class="modal-header-top">
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <button class="settings-tab active" data-tab="ia">🤖 IA</button>
-                    <button class="settings-tab" data-tab="appearance">🎨 Aparência</button>
+                    <h3 style="margin: 0; color: #fff; font-weight: 800;">⚙️ Configurações</h3>
                 </div>
                 <button class="close-settings" aria-label="Fechar">✕</button>
             </div>
             <div class="modal-body">
-                <div class="settings-panel" data-panel="ia">
-                    <div class="settings-option">
-                        <label for="aiApiKey">Chave da API OpenAI</label>
-                        <div style="display:flex;gap:8px;align-items:center;"><input type="password" id="aiApiKey" class="settings-input ai-key-input" placeholder="sk-..."> <button id="toggleAiKey" class="btn-secondary">Mostrar</button></div>
-                        <small>Sua chave é salva localmente no navegador.</small>
-                    </div>
-                    <div class="settings-option">
-                        <label for="aiModel">Modelo da IA</label>
-                        <select id="aiModel" class="settings-input">
-                            <option value="gpt-4">GPT-4</option>
-                            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                        </select>
-                    </div>
-                    <div class="settings-option">
-                        <label for="aiPrompt">Prompt inicial / Instrução</label>
-                        <textarea id="aiPrompt" class="settings-input" rows="4" placeholder="Instruções iniciais para o assistente..."></textarea>
-                    </div>
-                    <div class="settings-option">
-                        <label>Prompts salvos</label>
-                        <div id="savedPromptsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input id="newPromptText" class="settings-input" placeholder="Novo prompt curto...">
-                            <button id="addPromptBtn" class="btn-wide btn-ghost">Adicionar</button>
-                        </div>
-                    </div>
-                    <div class="settings-actions" style="margin-top:6px;">
-                        <button id="saveAiBtn" class="btn-wide">Salvar IA</button>
-                    </div>
-                </div>
-                <div class="settings-panel" data-panel="appearance" style="display:none;">
+                <div class="settings-panel" data-panel="appearance">
+                    <h4 style="margin-top: 0;">🎨 Aparência</h4>
                     <div class="settings-option">
                         <label class="checkbox-label"><input type="checkbox" id="darkMode"> <span>Modo Escuro</span></label>
                     </div>
@@ -330,6 +324,145 @@
                     <div class="settings-actions" style="margin-top:6px;">
                         <button id="saveUiBtn" class="btn-wide">Salvar Aparência</button>
                         <button id="resetUiBtn" class="btn-ghost">Resetar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Configurações de IA -->
+    <div id="aiSettingsModal" class="modal" aria-hidden="true">
+        <div class="modal-content modal-large">
+            <div class="modal-header-top">
+                <h3 style="margin: 0; color: #fff; font-weight: 800;">⚙️ Configurações de IA</h3>
+                <button class="close-ai-settings" aria-label="Fechar">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Abas de configuração -->
+                <div class="ai-settings-tabs">
+                    <button class="ai-tab-btn active" data-tab="test">🧪 Testar Conexão</button>
+                    <button class="ai-tab-btn" data-tab="api">🔑 API & Modelo</button>
+                    <button class="ai-tab-btn" data-tab="system">📋 System Prompt</button>
+                </div>
+
+                <!-- Aba 1: Testar Conexão -->
+                <div class="ai-tab-content active" data-tab="test">
+                    <div class="settings-section">
+                        <h4>🧪 Teste de Conexão</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Cole sua API Key e teste automaticamente em todos os modelos
+                        </p>
+                        
+                        <div id="testConnectionStatus" style="margin-bottom: 16px; padding: 12px; border-radius: 6px; background: rgba(99, 102, 241, 0.05); display: none;">
+                            <div id="testConnectionMessage" style="font-weight: 600; color: var(--primary-color);">⏳ Testando...</div>
+                        </div>
+
+                        <div class="settings-option">
+                            <label>🔑 Cole sua API Key</label>
+                            <input type="password" id="testApiKey" class="settings-input" placeholder="Cole sua API Key" style="margin-bottom: 8px;">
+                        </div>
+
+                        <div class="settings-actions" style="margin-top: 20px;">
+                            <button type="button" id="runConnectionTestBtn" class="btn-wide">🚀 Testar Automaticamente</button>
+                        </div>
+
+                        <div id="testResults" style="margin-top: 20px; display: none;">
+                            <div style="padding: 12px; border-radius: 6px; background: rgba(99, 102, 241, 0.05); border: 2px solid var(--primary-color);">
+                                <h5 style="margin: 0 0 12px 0; font-weight: 700;">📊 Resultado do Teste</h5>
+                                <div id="testResultsContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Aba 2: API & Modelo -->
+                <div class="ai-tab-content" data-tab="api">
+                    <div class="settings-section">
+                        <h4>🔑 Chave de API</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Configure sua chave de API para usar a IA
+                        </p>
+                        <div id="apiKeyStatusBadge" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.1); color: #ef4444; font-weight: 600; display: none; text-align: center;">
+                            ❌ API Key inválida ou não configurada
+                        </div>
+                        <div class="settings-option">
+                            <label>API Key</label>
+                            <input type="password" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key">
+                            <button type="button" class="btn-small" id="validateApiKeyBtn" style="margin-top: 6px; width: 100%; background: var(--primary-color); color: white;">🔍 Validar Chave</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" style="margin-top: 16px;">
+                        <h4>🤖 Modelo</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Escolha qual modelo de IA usar para respostas
+                        </p>
+                        <div class="settings-option">
+                            <div class="model-grid">
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-3.5-turbo" checked>
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 3.5 Turbo</div>
+                                        <div class="model-description">Rápido e econômico</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gemma-3-27b-it">
+                                    <div class="model-card">
+                                        <div class="model-name">Gemma 3 (Gemini)</div>
+                                        <div class="model-description">Modelo Gemini (GenAI) — seu modelo Gemma</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-4">
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 4</div>
+                                        <div class="model-description">Mais poderoso</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-4-turbo">
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 4 Turbo</div>
+                                        <div class="model-description">Rápido e potente</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    
+
+                    <div class="settings-actions" style="margin-top: 20px;">
+                        <button type="button" id="saveApiSettingsBtn" class="btn-wide">💾 Salvar Configurações</button>
+                    </div>
+                </div>
+
+                <!-- Aba 3: System Prompt -->
+                <div class="ai-tab-content" data-tab="system">
+                    <div class="settings-section">
+                        <h4>📋 System Prompt (Como a IA se comporta)</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Define o comportamento, tom e diretrizes para a IA. Similar ao ChatGPT.
+                        </p>
+                        <div class="settings-option">
+                            <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="Ex: Você é um assistente técnico especializado em...&#10;&#10;Responda sempre em português&#10;Seja conciso e direto&#10;Cite fontes quando relevante" rows="8"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" style="margin-top: 16px;">
+                        <h4>Max Tokens</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Máximo de tokens na resposta (mais = mais longo)
+                        </p>
+                        <div class="settings-option">
+                            <input type="number" id="aiMaxTokens" class="settings-input" min="100" max="4000" value="2000" placeholder="2000">
+                        </div>
+                    </div>
+
+                    <div class="settings-actions" style="margin-top: 20px;">
+                        <button type="button" id="saveSystemPromptBtn" class="btn-wide">💾 Salvar System Prompt</button>
+                        <button type="button" id="resetSystemPromptBtn" class="btn-ghost">🔄 Restaurar Padrão</button>
                     </div>
                 </div>
             </div>
