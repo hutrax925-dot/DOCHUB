@@ -4071,6 +4071,25 @@ html, body {
     background: rgba(99, 102, 241, 0.25);
 }
 
+/* Garantir visibilidade do botão de toggle da API Key */
+#toggleAiKeyBtn {
+    min-width: 40px;
+    height: 40px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(15,23,42,0.06);
+}
+
+#toggleAiKeyBtn:hover {
+    background: rgba(15,23,42,0.03);
+}
+
 /* Button de configurações de IA na navbar */
 .btn-ai-settings {
     display: none !important;

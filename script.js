@@ -1031,7 +1031,22 @@ function inicializarEventos() {
     document.getElementById('runConnectionTestBtn')?.addEventListener('click', testarConexaoIA);
 
     // Toggle visibilidade da API Key
-    // Visibilidade de API Key removida conforme solicitação (sem botões de mostrar/ocultar)
+    const toggleAiKeyBtn = document.getElementById('toggleAiKeyBtn');
+    if (toggleAiKeyBtn) {
+        toggleAiKeyBtn.addEventListener('click', (e) => {
+            const input = document.getElementById('aiApiKey');
+            if (!input) return;
+            if (input.type === 'password') {
+                input.type = 'text';
+                toggleAiKeyBtn.textContent = '🙈';
+                toggleAiKeyBtn.title = 'Ocultar chave';
+            } else {
+                input.type = 'password';
+                toggleAiKeyBtn.textContent = '👁️';
+                toggleAiKeyBtn.title = 'Mostrar chave';
+            }
+        });
+    }
 
     // Controle de temperatura removido da UI
 
@@ -1356,12 +1371,37 @@ function inicializarEventos() {
             return;
         }
 
+        // Ler também system prompt e max tokens
+        const systemPrompt = document.getElementById('aiSystemPrompt')?.value || '';
+        const maxTokens = parseInt(document.getElementById('aiMaxTokens')?.value) || 2000;
+
         aiConfig.apiKey = apiKey;
         aiConfig.model = model;
-        
+        aiConfig.systemPrompt = systemPrompt;
+        aiConfig.maxTokens = maxTokens;
+
+        // Incluir provider inferido
+        let provider = aiConfig.provider || '';
+        if (!provider) {
+            const name = (model || '').toLowerCase();
+            provider = (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) ? 'genai' : 'openai';
+            aiConfig.provider = provider;
+        }
 
         localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
         showToast('✅ Configurações de API salvas!', 'success');
+
+        // Fechar modal de configurações de IA
+        setModalVisible('aiSettingsModal', false);
+
+        // Ir direto para o Chat e focar o input
+        mudarSecao('chat');
+        setTimeout(() => {
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) {
+                chatInput.focus();
+            }
+        }, 150);
     }
 
     // Salvar System Prompt

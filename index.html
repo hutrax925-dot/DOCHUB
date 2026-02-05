@@ -387,7 +387,10 @@
                         </div>
                         <div class="settings-option">
                             <label>API Key</label>
-                            <input type="password" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key">
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="password" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key" style="flex:1;">
+                                <button type="button" id="toggleAiKeyBtn" class="btn-small" title="Mostrar/ocultar chave" style="white-space:nowrap;">👁️</button>
+                            </div>
                             <button type="button" class="btn-small" id="validateApiKeyBtn" style="margin-top: 6px; width: 100%; background: var(--primary-color); color: white;">🔍 Validar Chave</button>
                         </div>
                     </div>
