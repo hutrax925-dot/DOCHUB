@@ -4090,6 +4090,16 @@ html, body {
     background: rgba(15,23,42,0.03);
 }
 
+#toggleAiKeyBtn svg {
+    width: 18px;
+    height: 18px;
+    color: inherit;
+}
+
+/* Ajuste para alinhamento com input */
+.settings-option > div { display:flex; align-items:center; }
+.settings-option > div #aiApiKey { height:40px; }
+
 /* Button de configurações de IA na navbar */
 .btn-ai-settings {
     display: none !important;

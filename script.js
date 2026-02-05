@@ -1033,16 +1033,27 @@ function inicializarEventos() {
     // Toggle visibilidade da API Key
     const toggleAiKeyBtn = document.getElementById('toggleAiKeyBtn');
     if (toggleAiKeyBtn) {
+        // SVGs para olhos (open / closed)
+        const eyeOpen = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>'
+            + '</svg>';
+        const eyeClosed = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3l18 18"/>'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.58 10.58A3 3 0 0113.42 13.42"/>'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.12 14.12C12.98 15.26 11.03 15.26 9.89 14.12"/>'
+            + '</svg>';
+
         toggleAiKeyBtn.addEventListener('click', (e) => {
             const input = document.getElementById('aiApiKey');
             if (!input) return;
             if (input.type === 'password') {
                 input.type = 'text';
-                toggleAiKeyBtn.textContent = '🙈';
+                toggleAiKeyBtn.innerHTML = eyeClosed;
                 toggleAiKeyBtn.title = 'Ocultar chave';
             } else {
                 input.type = 'password';
-                toggleAiKeyBtn.textContent = '👁️';
+                toggleAiKeyBtn.innerHTML = eyeOpen;
                 toggleAiKeyBtn.title = 'Mostrar chave';
             }
         });
