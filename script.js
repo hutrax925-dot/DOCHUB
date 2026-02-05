@@ -374,7 +374,6 @@ function enviarMensagemChat() {
             message: text,
             system_prompt: effectiveSystemPrompt,
             
-            max_tokens: aiConfig.maxTokens || 2000,
             history: []
         }),
         signal: controller.signal
