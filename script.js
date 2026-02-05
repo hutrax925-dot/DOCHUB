@@ -358,6 +358,12 @@ function enviarMensagemChat() {
         else provider = 'openai';
     }
 
+    // Aplicar System Prompt estritamente: quando definido, enviamos uma
+    // versão reforçada como instrução obrigatória para o modelo.
+    const effectiveSystemPrompt = (aiConfig.systemPrompt && aiConfig.systemPrompt.trim())
+        ? `INSTRUÇÃO OBRIGATÓRIA - SIGA ESTAS DIRETRIZES À RISCA:\n${aiConfig.systemPrompt}`
+        : 'Você é um assistente útil';
+
     fetch('http://localhost:5000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -366,7 +372,7 @@ function enviarMensagemChat() {
             model: selectedModel,
             provider: provider,
             message: text,
-            system_prompt: aiConfig.systemPrompt || 'Você é um assistente útil',
+            system_prompt: effectiveSystemPrompt,
             
             max_tokens: aiConfig.maxTokens || 2000,
             history: []
@@ -1429,7 +1435,7 @@ function inicializarEventos() {
         aiConfig.maxTokens = maxTokens;
 
         localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
-        showToast('✅ System Prompt salvo!', 'success');
+        showToast('✅ System Prompt salvo (será aplicado como instrução obrigatória)', 'success');
     }
 
     // Restaurar System Prompt padrão
