@@ -25,12 +25,6 @@
     
     <nav class="navbar">
         <div class="navbar-container">
-            <button id="chatBackBtn" class="btn-chat-back" title="Voltar para Documentos" aria-label="Voltar" style="display: none;">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span>Voltar</span>
-            </button>
             <div class="navbar-logo">
                 <span class="logo-icon">📚</span>
                 <h1 class="navbar-title">DocHub</h1>
@@ -42,25 +36,11 @@
             <div class="navbar-chat-info" id="navbarChatInfo" style="display: none; text-align: center; flex: 1;">
                 <h2 style="margin: 0; font-size: 1.3rem; font-weight: 700; color: var(--primary-color);">🤖 Chat IA</h2>
             </div>
-            <div class="top-actions">
-                <button id="aiSettingsBtn" class="btn-settings btn-ai-settings" title="Configurações de IA" aria-label="Configurações de IA" style="display: none;">
-                    <!-- AI settings icon -->
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="#fff"/>
-                    </svg>
-                </button>
-                <button id="topSettingsBtn" class="btn-settings" title="Configurações" aria-label="Configurações">
-                    <!-- polished SVG gear -->
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" fill="#fff" />
-                        <path d="M19.4 13.1c.04-.36.06-.73.06-1.11s-.02-.75-.06-1.11l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.07 7.07 0 0 0-1.9-1.1l-.38-2.65A.5.5 0 0 0 12.6 2h-3a.5.5 0 0 0-.5.42l-.38 2.66a7.07 7.07 0 0 0-1.9 1.1l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.5 10.9c-.04.36-.06.73-.06 1.11s.02.75.06 1.11L2.39 14.87a.5.5 0 0 0-.12.64l2 3.46c.14.24.43.34.68.24l2.49-1c.6.48 1.26.87 1.95 1.16l.38 2.66c.05.26.27.44.52.44h3c.25 0 .47-.18.52-.44l.38-2.66c.7-.29 1.35-.68 1.95-1.16l2.49 1c.25.1.54 0 .68-.24l2-3.46a.5.5 0 0 0-.12-.64L19.4 13.1z" fill="#fff"/>
-                    </svg>
-                </button>
-            </div>
+            <button id="logoutBtn" class="btn-secondary" style="display:none; margin-left:12px;">Sair</button>
         </div>
     </nav>
 
-    <div class="container">
+    <div class="container" id="appContainer" style="display:flex;">
         
         <aside class="sidebar">
             <div class="sidebar-header">
@@ -124,7 +104,7 @@
 
             
             <section id="adicionar" class="content-section">
-                <h2>Nova Documentação</h2>
+                <div class="section-header"></div>
                 
                 <form id="docForm" class="form-container">
                     <div class="form-row">
@@ -161,20 +141,8 @@
                         <button id="fullscreenBackBtn" class="btn-back-fullscreen" style="display: none;">⬅️ Voltar</button>
                         <label>Conteúdo Completo *</label>
                         <div class="editor-toolbar">
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
-                            <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
-                            <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
-                            <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
-                            <span class="editor-divider"></span>
-                            <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
-                            <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
-                            <span class="editor-divider"></span>
                             <input type="file" id="docEditorImageInput" accept="image/*" style="display: none;">
                             <button type="button" class="editor-btn" id="docEditorImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
-                            <span class="editor-divider"></span>
-                            <button type="button" class="editor-btn" id="fullscreenAddToolbarBtn" title="Tela Grande">🖥️</button>
                         </div>
                         <div id="docContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva o conteúdo aqui. Use os botões para formatar. Inserir imagens no meio do texto..."></div>
                     </div>
@@ -183,20 +151,8 @@
                         <button id="fullscreenBackBtnPasso" class="btn-back-fullscreen" style="display: none;">⬅️ Voltar</button>
                         <label>Conteúdo Passo a Passo</label>
                         <div class="editor-toolbar">
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
-                            <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
-                            <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
-                            <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
-                            <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
-                            <span class="editor-divider"></span>
-                            <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
-                            <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
-                            <span class="editor-divider"></span>
                             <input type="file" id="docPassoEditorImageInput" accept="image/*" style="display: none;">
                             <button type="button" class="editor-btn" id="docPassoImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
-                            <span class="editor-divider"></span>
-                            <button type="button" class="editor-btn" id="fullscreenAddToolbarBtnPasso" title="Tela Grande">🖥️</button>
                         </div>
                         <div id="docPassoContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva os passos..."></div>
                     </div>
@@ -208,45 +164,12 @@
 
                     <div class="form-actions">
                         <button type="submit" class="btn-primary">💾 Salvar Documentação</button>
-                        <button type="button" id="sendAddToChatBtn" class="btn-secondary" title="Chat IA">🤖</button>
                     </div>
                 </form>
             </section>
 
             
-            <section id="chat" class="content-section">
-                
-                <div class="chat-wrapper">
-                    <div class="chat-container">
-                        <div class="chat-controls" style="padding:0.75rem 1.25rem; border-bottom:1px solid var(--border-color); background:var(--surface); display:flex; gap:1rem; align-items:center; justify-content: space-between;">
-                            <h2 style="margin:0; font-size:1.2rem; font-weight:600; color:var(--primary-color);">💬 Chat IA</h2>
-                            <div style="display: flex; gap: 10px;">
-                                <button id="clearChatBtn" class="btn-small" title="Limpar histórico do chat" aria-label="Limpar chat">🗑️ Limpar</button>
-                                <button id="chatSettingsBtn" class="btn-chat-settings" title="Configurações do Chat IA" aria-label="Configurações do Chat IA">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                        <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" fill="currentColor" />
-                                        <path d="M19.4 13.1c.04-.36.06-.73.06-1.11s-.02-.75-.06-1.11l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.07 7.07 0 0 0-1.9-1.1l-.38-2.65A.5.5 0 0 0 12.6 2h-3a.5.5 0 0 0-.5.42l-.38 2.66a7.07 7.07 0 0 0-1.9 1.1l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.5 10.9c-.04.36-.06.73-.06 1.11s.02.75.06 1.11L2.39 14.87a.5.5 0 0 0-.12.64l2 3.46c.14.24.43.34.68.24l2.49-1c.6.48 1.26.87 1.95 1.16l.38 2.66c.05.26.27.44.52.44h3c.25 0 .47-.18.52-.44l.38-2.66c.7-.29 1.35-.68 1.95-1.16l2.49 1c.25.1.54 0 .68-.24l2-3.46a.5.5 0 0 0-.12-.64L19.4 13.1z" fill="currentColor"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="chat-messages" id="chatMessages">
-                            <div class="chat-message bot">
-                                <div class="message-content">
-                                    <p>Olá! 👋 Sou seu assistente de IA. Faça perguntas sobre suas documentações, peça resumos ou ajuda na busca de informações. Como posso ajudá-lo?</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="chat-input-area">
-                            <div class="input-wrapper">
-                                <textarea id="chatInput" class="chat-input" placeholder="Digite sua mensagem..." rows="3" aria-label="Mensagem para o Chat IA"></textarea>
-                                <button id="chatSendBtn" class="btn-send-chat">Enviar</button>
-                            </div>
-                            <!-- dica removida conforme solicitado -->
-                        </div>
-                    </div>
-                </div>
-            </section>
+            <!-- Chat movido para página separada (chat.html). Acessível apenas pelo botão de Chat. -->
 
             
             <!-- Configurações removidas conforme solicitação do usuário -->
@@ -257,11 +180,13 @@
     <div id="docModal" class="modal">
         <div class="modal-content modal-fullscreen">
             <div class="modal-header-top">
-                <button id="editDocBtn" class="btn-secondary btn-edit-top">✏️ Editar</button>
-                <span class="close-modal-top">&times;</span>
-            </div>
-            <div class="modal-header">
-                <h2 id="modalTitle"></h2>
+                <div class="header-actions">
+                    <button id="editDocBtn" class="btn-secondary btn-edit-top">✏️ Editar</button>
+                    <span class="close-modal-top">&times;</span>
+                    <div class="modal-title-row">
+                        <h2 id="modalTitle"></h2>
+                    </div>
+                </div>
             </div>
             <div class="modal-version-toggle" id="modalVersionToggle" style="display: none; margin-bottom: 12px;">
                 <button class="version-btn active" data-version="normal">📄 Normal</button>
@@ -343,6 +268,7 @@
                     <button class="ai-tab-btn active" data-tab="test">🧪 Testar Conexão</button>
                     <button class="ai-tab-btn" data-tab="api">🔑 API & Modelo</button>
                     <button class="ai-tab-btn" data-tab="system">📋 System Prompt</button>
+                    <button class="ai-tab-btn" data-tab="commands">🧠 Comandos @</button>
                 </div>
 
                 <!-- Aba 1: Testar Conexão -->
@@ -359,7 +285,7 @@
 
                         <div class="settings-option">
                             <label>🔑 Cole sua API Key</label>
-                            <input type="password" id="testApiKey" class="settings-input" placeholder="Cole sua API Key" style="margin-bottom: 8px;">
+                            <input type="text" id="testApiKey" class="settings-input" placeholder="Cole sua API Key" style="margin-bottom: 8px;" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" name="ai-test-api-key">
                         </div>
 
                         <div class="settings-actions" style="margin-top: 20px;">
@@ -388,7 +314,7 @@
                         <div class="settings-option">
                             <label>API Key</label>
                             <div style="display:flex;gap:8px;align-items:center;">
-                                <input type="password" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key" style="flex:1;">
+                                <input type="text" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key" style="flex:1;" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" name="ai-api-key">
                                 <button type="button" id="toggleAiKeyBtn" class="btn-small" title="Mostrar/ocultar chave" style="white-space:nowrap;">
                                     <!-- ícone padrão: olho aberto -->
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -416,10 +342,10 @@
                                     </div>
                                 </label>
                                 <label class="model-option">
-                                    <input type="radio" name="aiModel" value="gemma-3-27b-it">
+                                    <input type="radio" name="aiModel" value="gemini-2.5-flash">
                                     <div class="model-card">
-                                        <div class="model-name">Gemma 3 (Gemini)</div>
-                                        <div class="model-description">Modelo Gemini (GenAI) — seu modelo Gemma</div>
+                                        <div class="model-name">Gemini 2.5 Flash (grátis)</div>
+                                        <div class="model-description">Modelo Gemini gratuito recomendado para a API atual</div>
                                     </div>
                                 </label>
                                 <label class="model-option">
@@ -454,24 +380,33 @@
                         <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
                             Define o comportamento, tom e diretrizes para a IA. Similar ao ChatGPT.
                         </p>
-                        <div class="settings-option">
-                            <textarea id="aiSystemPrompt" class="settings-textarea" placeholder="Ex: Você é um assistente técnico especializado em...&#10;&#10;Responda sempre em português&#10;Seja conciso e direto&#10;Cite fontes quando relevante" rows="8"></textarea>
-                        </div>
+                            <div class="settings-option">
+                                <label for="aiSummarySystemPrompt" style="font-weight:600; display:block; margin-bottom:0.75rem;">Passo a passo</label>
+                                <textarea id="aiSummarySystemPrompt" class="settings-textarea" placeholder="Prompt de passo a passo será criado quando você clicar em 'Resumir'." rows="8"></textarea>
+                                <small style="color:var(--text-secondary); display:block; margin-top:8px;">Esse prompt será usado para gerar respostas no formato passo a passo.</small>
+                            </div>
                     </div>
 
-                    <div class="settings-section" style="margin-top: 16px;">
-                        <h4>Max Tokens</h4>
-                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
-                            Máximo de tokens na resposta (mais = mais longo)
-                        </p>
-                        <div class="settings-option">
-                            <input type="number" id="aiMaxTokens" class="settings-input" min="100" max="4000" value="2000" placeholder="2000">
-                        </div>
-                    </div>
+                    <!-- Max Tokens removido conforme solicitado -->
 
                     <div class="settings-actions" style="margin-top: 20px;">
-                        <button type="button" id="saveSystemPromptBtn" class="btn-wide">💾 Salvar System Prompt</button>
-                        <button type="button" id="resetSystemPromptBtn" class="btn-ghost">🔄 Restaurar Padrão</button>
+                        <!-- System Prompt normal removido; uso de passo a passo é salvo via 'Salvar Configurações' -->
+                    </div>
+                </div>
+
+                <div class="ai-tab-content" data-tab="commands">
+                    <div class="settings-section">
+                        <h4>🧠 Comandos @</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Configure comandos <code>@nome</code> que substituem o System Prompt apenas para essa mensagem.
+                        </p>
+                        <div id="aiCommandsList" class="ai-commands-list"></div>
+                        <div class="ai-command-actions">
+                            <button type="button" id="addAiCommandBtn" class="btn-wide">➕ Novo Comando</button>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+                            Exemplo: <code>@duvida</code> carrega um prompt dedicado e substitui o prompt padrão apenas para essa mensagem.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -480,13 +415,16 @@
 
     <div id="editModal" class="modal">
         <div class="modal-content modal-content-large">
-            <div class="modal-header-top">
-                <span class="close-edit">⬅️ Voltar</span>
-                <span id="editContentType">Conteúdo Normal</span>
-                <h2>✏️ Editar Documentação</h2>
-            </div>
-            
             <form id="editForm" class="form-container">
+                <div class="modal-header-top">
+                    <div class="modal-top-row">
+                        <button type="button" class="btn-secondary btn-icon close-edit" title="Voltar" style="height: 47px; transform: translate(-70px, -53px); width: 48.5625px;">⬅</button>
+                        <div class="action-buttons">
+                            <button type="submit" class="version-btn wide-action-btn btn-action-save">💾 Salvar</button>
+                            <button type="button" class="version-btn wide-action-btn btn-action-delete delete-during-edit">🗑️ Deletar</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="editDocTitle">Título *</label>
@@ -506,66 +444,38 @@
                 <div class="form-group">
                     <label for="editDocDescription">Descrição *</label>
                     <input type="text" id="editDocDescription" required maxlength="100">
-                    <div class="char-counter" id="editDocDescriptionCounter">0/100</div>
                 </div>
 
-                <div class="edit-version-toggle" style="margin-bottom: 12px;">
+                <div class="form-group tag-row-group">
+                    <label for="editDocTags">Tags *</label>
+                    <div class="tag-input-row">
+                        <input type="text" id="editDocTags">
+                        <button type="button" id="sendEditToChatBtn" class="version-btn btn-chat-ia" title="Chat IA">🤖</button>
+                    </div>
+                </div>
+
+                <div class="edit-version-toggle" style="margin-bottom: 12px; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
                     <button type="button" class="version-btn active" data-edit-version="normal">📄 Editar Normal</button>
                     <button type="button" class="version-btn" data-edit-version="passo">👣 Editar Passo a Passo</button>
                 </div>
 
                 <div class="form-group" id="normalContentGroup">
                     <div class="editor-toolbar">
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
-                        <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
-                        <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
-                        <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
-                        <span class="editor-divider"></span>
-                        <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
-                        <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
-                        <span class="editor-divider"></span>
                         <input type="file" id="editDocEditorImageInput" accept="image/*" style="display: none;">
                         <button type="button" class="editor-btn" id="editDocEditorImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
-                        <span class="editor-divider"></span>
-                        <button type="button" class="editor-btn" id="fullscreenEditToolbarBtn" title="Tela Grande">🖥️</button>
-                        
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
                     </div>
                     <div id="editDocContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva o conteúdo..."></div>
                 </div>
 
                 <div class="form-group" id="passoContentGroup" style="display: none;">
                     <div class="editor-toolbar">
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h2" title="Título H2">H2</button>
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="h3" title="Título H3">H3</button>
-                        <button type="button" class="editor-btn" data-command="bold" title="Negrito"><strong>B</strong></button>
-                        <button type="button" class="editor-btn" data-command="italic" title="Itálico"><em>I</em></button>
-                        <button type="button" class="editor-btn" data-command="underline" title="Sublinhado"><u>U</u></button>
-                        <span class="editor-divider"></span>
-                        <button type="button" class="editor-btn" data-command="insertUnorderedList" title="Lista">• Lista</button>
-                        <button type="button" class="editor-btn" data-command="createLink" title="Link">🔗 Link</button>
-                        <span class="editor-divider"></span>
                         <input type="file" id="editDocPassoImageInput" accept="image/*" style="display: none;">
                         <button type="button" class="editor-btn" id="editDocPassoImageBtn" title="Inserir Imagem">🖼️ Imagem</button>
-                        <span class="editor-divider"></span>
-                        <button type="button" class="editor-btn" id="fullscreenEditToolbarBtnPasso" title="Tela Grande">🖥️</button>
-                        
-                        <button type="button" class="editor-btn" data-command="formatBlock" data-value="p" title="Parágrafo">¶</button>
                     </div>
                     <div id="editDocPassoContent" class="rich-editor" contenteditable="true" data-placeholder="Escreva os passos..."></div>
                 </div>
 
-                <div class="form-group">
-                    <label for="editDocTags">Tags</label>
-                    <input type="text" id="editDocTags">
-                </div>
-
-                <div class="form-actions">
-                        <button type="submit" class="btn-primary">💾 Salvar Alterações</button>
-                        <button type="button" id="sendEditToChatBtn" class="btn-secondary" title="Chat IA">🤖</button>
-                        <button type="button" class="btn-danger delete-during-edit">🗑️ Deletar Documentação</button>
-                </div>
+                <!-- form actions moved to header to keep a single scrollable area -->
             </form>
         </div>
     </div>
@@ -621,17 +531,8 @@
                     <input type="text" id="categoryName" required placeholder="Ex: Políticas, Procedimentos, Bugs...">
                 </div>
 
-                <div class="form-group">
-                    <label for="categoryIcon">Emoji/Ícone</label>
-                        <div style="display:flex;gap:0.5rem;align-items:center;">
-                            <input type="text" id="categoryIcon" placeholder="Ex: 📋" maxlength="2" value="📂" readonly style="width:64px;text-align:center;background:transparent;border:none;">
-                            <button type="button" id="toggleIconPaletteBtn" class="btn-secondary" style="padding:0.45rem 0.6rem;">Selecionar ícone</button>
-                        </div>
-                        
-                        <input type="hidden" id="editingCategoryId" value="">
-                </div>
-
-                
+                <input type="hidden" id="categoryIcon" value="📂">
+                <input type="hidden" id="editingCategoryId" value="">
 
                 <div class="form-actions">
                     <button id="categorySubmitBtn" type="submit" class="btn-primary">➕ Criar Categoria</button>
@@ -644,26 +545,38 @@
     
     <!-- FAB openAiBtn removed — IA acessível via botões de Criar/Editar -->
 
-    
-    <div id="iconPopover" class="icon-popover" style="display:none; position:absolute; z-index:2100;">
-        <div class="icon-popover-grid">
-            <button type="button" class="icon-choice" data-value="📂">📂</button>
-            <button type="button" class="icon-choice" data-value="📋">📋</button>
-            <button type="button" class="icon-choice" data-value="🗂️">🗂️</button>
-            <button type="button" class="icon-choice" data-value="📁">📁</button>
-            <button type="button" class="icon-choice" data-value="🔖">🔖</button>
-            <button type="button" class="icon-choice" data-value="📎">📎</button>
-            <button type="button" class="icon-choice" data-value="📌">📌</button>
-            <button type="button" class="icon-choice" data-value="⚙️">⚙️</button>
-            <button type="button" class="icon-choice" data-value="🧩">🧩</button>
-            <button type="button" class="icon-choice" data-value="🔥">🔥</button>
-            <button type="button" class="icon-choice" data-value="✅">✅</button>
+    <div id="deleteCategoryConfirmModal" class="modal" aria-hidden="true">
+        <div class="modal-content modal-small">
+            <div class="modal-header-top delete-category-header">
+                <div class="delete-category-title">
+                    <span class="delete-category-folder">📂</span>
+                    <span id="deleteCategoryConfirmTitle">Categoria</span>
+                </div>
+            </div>
+            <div class="modal-body delete-category-body">
+                <p id="deleteCategoryConfirmMessage">Excluir esta categoria?</p>
+                <div class="form-actions delete-category-actions">
+                    <button type="button" class="btn-secondary" id="cancelDeleteCategoryBtn">Cancelar</button>
+                    <button type="button" class="btn-danger" id="confirmDeleteCategoryBtn">Deletar</button>
+                </div>
+            </div>
         </div>
     </div>
 
-    
     <div id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+    <div id="formatPopup" class="format-popup" aria-hidden="true" role="toolbar">
+        <button type="button" class="format-btn" data-format="p" title="Parágrafo">P</button>
+        <button type="button" class="format-btn" data-format="h1" title="Título H1">H1</button>
+        <button type="button" class="format-btn" data-format="h2" title="Título H2">H2</button>
+        <span class="format-divider"></span>
+        <button type="button" class="format-btn" data-format="bold" title="Negrito"><strong>B</strong></button>
+        <button type="button" class="format-btn" data-format="italic" title="Itálico"><em>I</em></button>
+        <button type="button" class="format-btn" data-format="underline" title="Sublinhado"><u>U</u></button>
+    </div>
 
+    <div id="mentionPopup" class="mention-popup" aria-hidden="true" role="listbox"></div>
+
+    <script src="ai_config_utils.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

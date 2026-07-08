@@ -4,6 +4,8 @@
     box-sizing: border-box;
 }
 
+/* Permitir transições/ani­mações sutis em elementos específicos (não globalmente). */
+
 /* Floating AI Chat Button */
 .floating-ai-btn {
     position: fixed;
@@ -18,6 +20,9 @@
     box-shadow: 0 6px 18px rgba(99,102,241,0.2);
     cursor: pointer;
     font-weight: 700;
+    display: flex;
+}
+.message-content.selected .bot-action-buttons {
     display: flex;
     gap: 0.5rem;
     align-items: center;
@@ -106,14 +111,7 @@
         overflow-y: auto !important;
     }
 
-    .docs-container {
-        display: flex !important;
-        flex-wrap: wrap !important;
-        gap: 1rem !important;
-        padding: 1rem 0.5rem 3rem 0.5rem !important;
-        max-height: 80vh !important;
-        overflow-y: auto !important;
-    }
+    /* .docs-container removido - conflitava com definições corretas abaixo */
 
     .doc-card {
         position: static !important;
@@ -150,13 +148,6 @@
     }
 
     /* fim normalizer */
-
-    /* FINAL OVERRIDE: garantir grid 3-colunas no desktop e permitir quebra de títulos */
-    @media (min-width: 1024px) {
-        .docs-container { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; gap: 1.5rem !important; }
-        .doc-card { display: flex !important; flex-direction: column !important; min-height: 560px !important; }
-        .doc-title { white-space: normal !important; overflow: visible !important; }
-    }
 }
 
 body.dark-mode {
@@ -173,8 +164,8 @@ body {
     color: var(--text-primary);
     transition: background-color 0.3s ease, color 0.3s ease;
     line-height: 1.6;
-    font-size: 13px; /* 5% menor */
-    overflow: auto; /* Restaurar scroll externo */
+    font-size: 16px; /* tamanho base aumentado para leitura confortável */
+    overflow: auto; /* Restaurar o scroll externo */
 }
 
 
@@ -205,9 +196,1681 @@ body.modal-open html {
     margin: 0 auto;
     padding: 0.75rem 1.5rem; /* Diminuído */
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 2rem;
+}
+
+.navbar-container .navbar-logo {
+    flex-shrink: 0;
+}
+
+.navbar-container .nav-menu {
+    flex: 1;
+    justify-content: center;
+}
+
+.navbar-container .navbar-chat-info {
+    flex-shrink: 0;
+}
+
+/* Chat navbar: centraliza título e fixa botões nas extremidades */
+.navbar-container.chat-navbar {
+    position: relative;
+    /* aumentar espaçamento vertical do cabeçalho do chat */
+    padding-top: 1.1rem;
+    padding-bottom: 1.1rem;
+    min-height: 64px;
+}
+.navbar-container.chat-navbar .navbar-logo {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.navbar-container.chat-navbar .navbar-logo .logo-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+}
+.navbar-container.chat-navbar .navbar-logo .navbar-title,
+.navbar-container.chat-navbar .navbar-logo h1 {
+    margin: 0;
+}
+.navbar-container.chat-navbar .btn-chat-back {
+    position: fixed;
+    left: 6px; /* super canto esquerdo */
+    top: 10px;
+    transform: none;
+    z-index: 1100;
+}
+.navbar-container.chat-navbar .top-actions {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.navbar-container.chat-navbar .top-actions button {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    border: 1px solid rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.navbar-container.chat-navbar .top-actions button:hover {
+    background: rgba(255,255,255,0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+}
+
+.navbar-container.chat-navbar .top-actions button:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.navbar-container.chat-navbar .top-actions button#aiSettingsBtn {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    font-size: 1rem;
+    background: rgba(255,255,255,0.16);
+}
+
+.navbar-container.chat-navbar .btn-clear-top,
+.navbar-container.chat-navbar .chat-editor-toggle,
+.navbar-container.chat-navbar .btn-settings {
+    min-width: 44px;
+}
+
+.chat-sidebar-editor {
+    /* Participa do fluxo do layout para ficar lado-a-lado com o chat */
+    position: static; /* não fixo — deixa o flex container controlar a posição */
+    right: auto;
+    top: auto;
+    width: 450px; /* largura padrão do editor lateral */
+    max-width: 40%;
+    height: 800px;
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.04);
+    display: flex;
+    flex-direction: column;
+    z-index: 1050;
+    overflow: hidden;
+    transform: none;
+    transition: all 220ms ease;
+}
+.chat-sidebar-editor .chat-editor-header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 10px;
+    border-bottom:1px solid var(--border-color);
+    background: var(--surface);
+    border-top-left-radius: 1.5rem; /* casar com o container */
+    border-top-right-radius: 1.5rem; /* casar com o container */
+}
+
+/* garantir que o corpo e o rodapé respeitem os cantos inferiores */
+.chat-sidebar-editor .chat-editor-body {
+    background: transparent;
+    padding: 0.5rem 0.75rem 1rem 0.75rem;
+    display: flex; /* permite que o editor ocupe toda a altura internamente */
+    flex-direction: column;
+    min-height: 0; /* importante para permitir scroll interno */
+}
+.chat-sidebar-editor .chat-editor-footer {
+    border-bottom-left-radius: 1.5rem;
+    border-bottom-right-radius: 1.5rem;
+    background: transparent;
+}
+
+/* botão de criar Passo a partir do Normal (estilo leve) */
+.btn-wide {
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+}
+.btn-wide.secondary { background: var(--secondary-color); }
+
+/* Wrapper e botão 'Resumo' dentro do Passo a Passo (visível apenas em passo-mode) */
+.passo-resumo-wrapper, #passoResumoWrapper { display: none; }
+
+.chat-sidebar-editor.passo-mode #passoResumoWrapper,
+.chat-sidebar-editor.passo-mode .passo-resumo-wrapper {
+    display: flex !important;
+    justify-content: center;
     align-items: center;
 }
+
+/* Mostrar botão de 'Resumir' inline quando editor estiver fechado (para disponibilizar sempre) */
+#passoResumoInline { display: none; }
+.chat-main.editor-closed #passoResumoInline { display: flex !important; }
+.chat-main.editor-closed #passoResumoInline .btn-resumo { padding: 8px 10px; font-size: 0.9rem; }
+
+.btn-resumo {
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: rgba(99, 102, 241, 0.08);
+    color: var(--primary-color);
+    border: 2px solid var(--primary-color);
+    cursor: pointer;
+    font-weight: 700;
+    transition: all 200ms ease;
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2),
+                0 4px 12px rgba(99, 102, 241, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+}
+.btn-resumo:hover {
+    transform: translateY(-2px);
+    background: rgba(99, 102, 241, 0.12);
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3),
+                0 8px 20px rgba(99, 102, 241, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.btn-resumo:disabled,
+.btn-resumo.disabled {
+    background: rgba(55, 65, 81, 0.6);
+    color: rgba(229, 231, 235, 0.5);
+    border-color: rgba(75, 85, 99, 0.4);
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.btn-resumo:disabled:hover,
+.btn-resumo.disabled:hover {
+    background: rgba(55, 65, 81, 0.6);
+    transform: none;
+    box-shadow: 0 0 0 1px rgba(75, 85, 99, 0.2),
+                0 2px 8px rgba(0, 0, 0, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Make the chat controls match page background and remove its divider line */
+.chat-controls {
+    background: var(--background) !important;
+    border-bottom: none !important;
+    padding: 0.75rem 1.25rem; /* ensure spacing consistent */
+    display:flex;
+    gap:1rem;
+    align-items:center;
+    justify-content: space-between;
+}
+
+/* When editor is open, restore controls/input to surface with divider lines */
+body:not(.chat-editor-closed) .chat-controls {
+    background: var(--surface) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+body:not(.chat-editor-closed) .chat-input-area {
+    background: linear-gradient(180deg, var(--surface) 0%, rgba(99,102,241,0.02) 100%) !important;
+    border-top: 1px solid var(--border-color) !important;
+}
+
+/* --- Neon border externo ao redor apenas do bloco de chat (mensagens + input) --- */
+.chat-container { position: relative; z-index: 1; }
+/* Borda externa ao redor do chat (wrapper) — aplica borda real em volta, não preenche fundo */
+.chat-wrapper { position: relative; overflow: hidden; display: flex; flex-direction: column; height: 800px; width: 100%; }
+
+/* Borda externa — desenhada fora do `.chat-container` para aparecer em volta (não preencher fundo) */
+.chat-wrapper::before {
+    content: '';
+    position: absolute;
+    /* alinhar exatamente ao bloco */
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    /* borda com cantos arredondados em todos os lados (incluindo esquerda) */
+    border-radius: 0.75rem;
+    border-top-left-radius: 0.75rem;
+    border-bottom-left-radius: 0.75rem;
+    /* deslocar levemente para baixo para alinhar com a documentação */
+    transform: translateY(6px);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 0;
+    box-sizing: border-box;
+}
+
+/* Quando uma modal estiver aberta, forçar borda sólida nítida ao redor do chat
+   (remove possíveis efeitos de blur por sobreposição de sombras). */
+body.modal-open .chat-wrapper::before {
+    opacity: 1 !important;
+    border: 4px solid var(--primary-color) !important;
+    box-shadow: none !important;
+    border-radius: 0.75rem !important;
+    border-top-left-radius: 0.75rem !important;
+    border-bottom-left-radius: 0.75rem !important;
+    transform: translateY(6px) !important;
+}
+
+/* Quando o editor está totalmente fechado, esconder imediatamente a pseudo-borda
+   (sem animação). Mantemos apenas as regras estáticas para modos normal/passo. */
+body.chat-editor-closed .chat-wrapper::before {
+    display: none !important;
+}
+
+/* Modo Normal: borda forte e imponente igual às docs */
+.chat-wrapper.normal-mode::before {
+    opacity: 1;
+    /* borda igual à documentação: espessa e nítida; sombra removida para evitar blur */
+    border: 4px solid var(--primary-color);
+    box-shadow: none;
+    border-radius: 0.75rem;
+    border-top-left-radius: 0.75rem;
+    border-bottom-left-radius: 0.75rem;
+    transform: translateY(6px);
+}
+
+/* Modo Passo: borda roxa forte */
+.chat-wrapper.passo-mode::before {
+    opacity: 1;
+    border: 4px solid var(--secondary-color);
+    box-shadow: none;
+    border-radius: 0.75rem;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+/* Em telas pequenas ou quando a largura reduz, escondemos a borda externa
+   para evitar artefatos do layout responsivo e problemas ao rolar/resize. */
+@media (max-width: 900px) {
+    .chat-wrapper::before { display: none !important; }
+    /* fallback: usar outline no container (menos propenso a clipping) */
+    .chat-container.normal-mode { outline: 3px solid rgba(99,102,241,0.22); outline-offset: 4px; }
+    .chat-container.passo-mode { outline: 3px solid rgba(139,92,246,0.22); outline-offset: 4px; }
+
+    /* quando fechado, remover qualquer outline fallback também */
+    body.chat-editor-closed .chat-container.normal-mode,
+    body.chat-editor-closed .chat-container.passo-mode {
+        outline: none !important;
+    }
+}
+
+/* Remover outline anterior do container para evitar duplicidade */
+.chat-container { transition: box-shadow 260ms ease, transform 260ms ease; }
+.chat-container.normal-mode, .chat-container.passo-mode { outline: none !important; }
+
+/* remover bordas diretas do container para evitar duplicidade */
+.chat-container.normal-mode, .chat-container.passo-mode { border: none !important; box-shadow: none !important; }
+
+/* Evitar que o neon se sobreponha ao editor lateral: reduzir overflow visível e controlar z-index */
+.chat-container, .chat-sidebar-editor { will-change: box-shadow, transform; }
+.chat-sidebar-editor .editor-tabs { display:flex; gap:6px; }
+.editor-tab { padding:6px 10px; border-radius:6px; background:transparent; border:none; cursor:pointer; font-weight:600; }
+.editor-tab.active { background: rgba(99,102,241,0.1); color: var(--primary-color); }
+
+/* Estilo específico quando o editor lateral está aberto: abas com fundo colorido, texto branco e borda forte */
+.chat-sidebar-editor.open .editor-tab {
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    text-align: center;
+    background: transparent;
+    border: 2px solid transparent;
+    width: 160px; /* largura fixa igual para ambas as abas */
+    max-width: 160px;
+    box-sizing: border-box;
+    transition: background-color 480ms cubic-bezier(.2,.9,.2,1), color 480ms cubic-bezier(.2,.9,.2,1), box-shadow 480ms cubic-bezier(.2,.9,.2,1), filter 480ms cubic-bezier(.2,.9,.2,1), opacity 480ms cubic-bezier(.2,.9,.2,1);
+}
+
+.chat-sidebar-editor.open #editorTabNormal {
+    background: rgba(99,102,241,0.12); /* azul semitransparente mais suave */
+    border-color: var(--primary-color);
+    color: #fff;
+    transition: background-color 480ms cubic-bezier(.2,.9,.2,1), border-color 480ms cubic-bezier(.2,.9,.2,1), box-shadow 480ms cubic-bezier(.2,.9,.2,1);
+}
+
+.chat-sidebar-editor.open #editorTabPasso {
+    background: rgba(139,92,246,0.12); /* roxo semitransparente mais suave */
+    border-color: var(--secondary-color);
+    color: #fff;
+    transition: background-color 480ms cubic-bezier(.2,.9,.2,1), border-color 480ms cubic-bezier(.2,.9,.2,1), box-shadow 480ms cubic-bezier(.2,.9,.2,1);
+}
+
+/* Quando em normal-mode: normal fica azul forte; passo a passo dessaturado/acinzentado com transição */
+.chat-sidebar-editor.normal-mode #editorTabNormal {
+    background: rgba(99,102,241,0.18) !important; /* fundo translúcido mais suave */
+    color: #fff !important;
+    border-color: var(--primary-dark) !important;
+    box-shadow: 0 10px 34px rgba(99,102,241,0.22);
+}
+.chat-sidebar-editor.normal-mode #editorTabPasso {
+    filter: grayscale(100%) !important;
+    opacity: 0.36 !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+}
+
+/* Quando em passo-mode: passo fica roxo forte; normal dessaturado */
+.chat-sidebar-editor.passo-mode #editorTabPasso {
+    background: rgba(139,92,246,0.18) !important; /* fundo translúcido mais suave */
+    color: #fff !important;
+    border-color: var(--secondary-color) !important;
+    box-shadow: 0 10px 34px rgba(139,92,246,0.22);
+}
+.chat-sidebar-editor.passo-mode #editorTabNormal {
+    filter: grayscale(100%) !important;
+    opacity: 0.36 !important;
+    background: transparent !important;
+    color: var(--text-secondary) !important;
+}
+
+/* animação suave na transição da borda/container */
+.chat-sidebar-editor {
+    transition: border-color 520ms cubic-bezier(.2,.9,.2,1), box-shadow 520ms cubic-bezier(.2,.9,.2,1), background-color 520ms cubic-bezier(.2,.9,.2,1), transform 520ms cubic-bezier(.2,.9,.2,1);
+}
+
+/* Estado ativo com destaque maior */
+.chat-sidebar-editor.open .editor-tab.active#editorTabNormal {
+    background: rgba(99,102,241,0.22);
+    box-shadow: 0 8px 20px rgba(99,102,241,0.12);
+    border-color: var(--primary-dark);
+}
+
+.chat-sidebar-editor.open .editor-tab.active#editorTabPasso {
+    background: rgba(139,92,246,0.22);
+    box-shadow: 0 8px 20px rgba(139,92,246,0.12);
+    border-color: var(--secondary-color);
+}
+
+/* Centralizar as abas dentro do header */
+.chat-sidebar-editor.open .editor-tabs {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Ajuste responsivo: larguras menores em telas pequenas */
+@media (max-width: 480px) {
+    .chat-sidebar-editor.open .editor-tab {
+        width: 120px;
+        max-width: 120px;
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+}
+.chat-sidebar-editor .chat-editor-body { padding:10px; overflow:auto; flex:1; min-height:0; }
+/* Remover borda interna que limita a leitura do conteúdo (Normal / Passo a Passo)
+   quando o editor estiver aberto: o painel externo mantém bordas, mas
+   o conteúdo interno ocupa todo o espaço disponível para leitura. */
+.chat-sidebar-editor.open .chat-rich-editor {
+    border: none !important;
+    background: transparent !important;
+    padding: 12px 6px !important;
+    border-radius: 0 !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    color: var(--text-primary);
+    flex: 1 1 auto; /* ocupar todo o espaço vertical disponível */
+    min-height: 0; /* permitir scroll interno */
+    max-height: none;
+}
+.chat-rich-editor { min-height: 220px; max-height: none; padding:8px; border-radius:6px; background:var(--surface); border:1px solid var(--border-color); color:var(--text-primary); overflow:auto; flex: 1 1 auto; }
+
+/* ===== Card de Documentação: animação de borda ao passar o mouse ===== */
+.doc-card {
+    position: relative;
+    overflow: visible;
+    border-radius: 0.75rem;
+}
+
+.doc-card .card-border-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.doc-card .card-border-svg svg { width: 100%; height: 100%; display:block; overflow: visible; }
+
+.doc-card {
+    position: relative;
+    overflow: hidden;
+    transition: transform 175ms ease, box-shadow 175ms ease, border-color 175ms ease, opacity 175ms ease !important;
+    will-change: transform, box-shadow, opacity;
+}
+
+.doc-card .card-border-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+}
+
+
+.doc-card .card-border-svg rect {
+    stroke: var(--primary-color);
+    stroke-width: 3;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: var(--dashlen, 400);
+    stroke-dashoffset: var(--dashlen, 400);
+    opacity: 0;
+    transition: opacity 98ms linear;
+    animation: none;
+}
+
+.doc-card:hover .card-border-svg rect,
+.doc-card.card-hovering .card-border-svg rect {
+    animation: drawDash 630ms linear forwards;
+    opacity: 1;
+}
+
+.doc-card.card-leaving .card-border-svg rect {
+    animation: drawDash 630ms linear forwards, fadeOut 280ms 0ms forwards;
+    opacity: 1;
+}
+
+@keyframes drawDash {
+    to { stroke-dashoffset: 0; }
+}
+
+@keyframes fadeOut {
+    to { opacity: 0; }
+}
+
+
+/* garantir que os elementos editáveis ocupem todo o espaço disponível */
+#chatEditContent, #chatEditPassoContent {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    overflow: auto;
+}
+
+/* Borda neon azul forte ao redor de todo o campo de documentação
+   quando a aba `Normal` estiver ativa (modo de criação). */
+.chat-sidebar-editor.normal-mode {
+    /* borda forte (neon) envolvendo todo o painel, mas sem sombra pesada */
+    border: 4px solid var(--primary-color) !important;
+    box-shadow: none !important;
+    border-radius: 1.5rem !important;
+    padding: 6px; /* espaço entre borda externa e conteúdo interno */
+    background-clip: padding-box;
+}
+
+/* garantir que o header (abas) fique dentro da área da borda
+   e seja exibido acima de sombras internas */
+.chat-sidebar-editor.normal-mode .chat-editor-header {
+    position: relative;
+    z-index: 3;
+    background: var(--surface);
+    margin-top: 0;
+    border-top-left-radius: 1.25rem;
+    border-top-right-radius: 1.25rem;
+}
+
+.chat-sidebar-editor.normal-mode .chat-editor-body {
+    padding: 8px; /* ajustar espaço interno agora que a borda está no container */
+    background: transparent;
+}
+
+.chat-sidebar-editor.normal-mode .chat-rich-editor,
+.chat-sidebar-editor.normal-mode #chatEditContent {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+.chat-sidebar-editor.passo-mode {
+    /* borda roxa forte quando passo a passo estiver ativo */
+    border: 4px solid var(--secondary-color) !important;
+    box-shadow: 0 0 24px rgba(139,92,246,0.22), 0 6px 14px rgba(139,92,246,0.08) inset;
+    border-radius: 1.5rem !important;
+    padding: 6px;
+    background-clip: padding-box;
+}
+
+.chat-sidebar-editor.passo-mode .chat-editor-header {
+    position: relative;
+    z-index: 2;
+    background: var(--surface);
+}
+
+.chat-sidebar-editor.passo-mode .chat-editor-body {
+    background: transparent;
+    padding: 8px;
+}
+.chat-sidebar-editor .editor-actions .btn-small { padding:6px 10px; }
+
+@media (max-width: 900px) {
+    .chat-sidebar-editor { display: none; }
+}
+
+/* Layout para chat + editor lateral em telas grandes */
+.chat-main {
+    display: flex;
+    flex-direction: row;
+    gap: 28px; /* aumentar espaço entre chat e editor para evitar colisão visual */
+    align-items: flex-start;
+    margin: 0 auto;
+    box-sizing: border-box;
+    transition: gap 280ms ease, flex-direction 280ms ease;
+}
+
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    /* Não crescer dinamicamente - ficar fixo em 1200px */
+    flex: 0 0 1200px;
+    min-width: 350px;
+    max-width: 1200px;
+    width: 1200px;
+    /* Altura fixa 800px para acompanhar a borda */
+    height: 800px;
+    max-height: 800px;
+    min-height: 800px;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.chat-messages {
+    flex: 1 1 auto;
+    overflow: auto; /* permitir rolagem interna quando necessário */
+    padding: 16px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.01), transparent);
+    min-width: 0; /* garantir que o conteúdo possa encolher sem forçar overflow do container */
+}
+
+.chat-input-area {
+    flex: 0 0 auto;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    background: var(--surface);
+}
+
+/* FORÇAR TEXTO BRANCO NO CHAT IA: garante que, ao mover/converter conteúdos
+   para resumo ou outras operações, o texto continue legível (branco) sem
+   alterar os fundos originais de cada balão/painel. */
+.chat-container .message-content,
+.chat-container .message-content *,
+.chat-messages .message-content,
+.chat-sidebar-editor .chat-rich-editor,
+.chat-sidebar-editor #chatEditContent,
+.chat-sidebar-editor #chatEditPassoContent {
+    color: #ffffff !important;
+}
+
+/* Preserve contraste de links e código dentro das mensagens */
+.chat-container .message-content a { color: #dbeafe !important; }
+.chat-container .message-content code, .chat-container .message-content pre { color: #fff !important; background: rgba(0,0,0,0.12); }
+
+/* Em telas muito largas, manter o editor como 'flutuante' fixo na lateral.
+   Em larguras intermediárias usamos o layout em duas colunas (flex) para
+   evitar sobreposição — o editor fica no fluxo e reduz sua largura. */
+@media (max-width: 1720px) {
+    /* Quando a tela diminuir de 1720px até 1555px, o chat diminui de 1200px até 1000px */
+    /* Doc fica 450px + gap 28px = 478px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 1000px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1555px) {
+    /* Quando a tela diminuir de 1555px, o chat diminui de 1200px até 900px */
+    /* Doc fica 450px + gap 28px = 478px, chat diminui até 900px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 900px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1480px) {
+    /* Quando a tela diminuir de 1480px, o chat diminui de 1200px até 850px */
+    /* Doc fica 450px + gap 28px = 478px, chat diminui até 850px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 850px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1400px) {
+    /* Quando a tela diminuir de 1400px, o chat diminui de 1200px até 800px */
+    /* Doc fica 450px + gap 28px = 478px, chat diminui até 800px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 800px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1350px) {
+    /* Quando a tela diminuir de 1350px, o chat diminui até 750px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 750px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1300px) {
+    /* Quando a tela diminuir de 1300px, o chat diminui até 700px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 700px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1250px) {
+    /* Quando a tela diminuir de 1250px, o chat diminui até 650px */
+    #chat {
+        display: block !important;
+        width: auto !important;
+        flex: none !important;
+    }
+    .chat-main {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 28px !important;
+        align-items: flex-start !important;
+        margin: 0 auto !important;
+        padding: 0 1rem !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    .chat-wrapper {
+        height: max(600px, 100vh - 120px) !important;
+    }
+    .chat-container {
+        flex: 1 !important;
+        width: auto !important;
+        max-width: 1200px !important;
+        min-width: 650px !important;
+        height: max(600px, 100vh - 120px) !important;
+        max-height: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+    .chat-input-area {
+        flex: 0 0 auto !important;
+        padding: 12px 16px !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+    .chat-input {
+        max-height: none !important;
+        min-height: 44px !important;
+        height: auto !important;
+    }
+    .chat-sidebar-editor {
+        flex: 0 0 450px !important;
+        width: 450px !important;
+        max-width: 450px !important;
+        min-width: 450px !important;
+        height: max(600px, 100vh - 120px) !important;
+        position: static !important;
+        display: flex !important;
+    }
+}
+
+@media (max-width: 1200px) {
+    /* Em telas menores que 1200px: chat em cima, documentação em baixo, centralizados com mesma largura */
+    .chat-main {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 20px !important;
+        margin: 0 auto !important;
+        padding: 1rem !important;
+        max-width: 900px !important;
+        align-items: center !important;
+        height: auto !important;
+    }
+    .chat-wrapper {
+        width: 900px !important;
+        max-width: 900px !important;
+        height: 800px !important;
+        max-height: 800px !important;
+    }
+    .chat-container {
+        width: 900px !important;
+        max-width: 900px !important;
+        height: 800px !important;
+        max-height: 800px !important;
+        min-width: 900px !important;
+        flex: none !important;
+    }
+    .chat-messages {
+        flex: 1 1 auto !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        overflow: auto !important;
+        margin: 0 !important;
+    }
+    .chat-input-area {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 12px 16px !important;
+        flex: 0 0 auto !important;
+    }
+    .chat-sidebar-editor {
+        width: 900px !important;
+        max-width: 900px !important;
+        height: 800px !important;
+        max-height: 800px !important;
+        min-width: 900px !important;
+        position: static !important;
+        display: flex !important;
+        flex-direction: column !important;
+        flex: none !important;
+    }
+    .chat-editor-body {
+        flex: 1 !important;
+        height: auto !important;
+        max-height: calc(800px - 60px) !important;
+        overflow: auto !important;
+        padding: 0.5rem 0.75rem !important;
+    }
+}
+
+@media (max-width: 960px) {
+    /* Em telas menores que 960px: reduzir largura em 60px */
+    .chat-main {
+        max-width: 840px !important;
+    }
+    .chat-wrapper {
+        width: 840px !important;
+        max-width: 840px !important;
+    }
+    .chat-container {
+        width: 840px !important;
+        max-width: 840px !important;
+        min-width: 840px !important;
+    }
+    .chat-sidebar-editor {
+        width: 840px !important;
+        max-width: 840px !important;
+        min-width: 840px !important;
+    }
+}
+
+
+
+/* ===== BREAKPOINTS DE LARGURA RESPONSIVA: .chat-wrapper.normal-mode =====
+   
+   COMO FUNCIONA:
+   - Cada range define uma largura específica para o chat
+   - Quando a tela atinge ou ultrapassa o px mínimo, o chat muda para aquela largura
+   - Se a tela descer de tamanho DENTRO do mesmo range, mantém aquela largura
+   - Exemplo: em 1650px muda para 500px, desce até 1600px mantém 500px,
+     ao atingir 1600px exato muda para 450px e mantém até o próximo range
+   
+   PADRÃO PARA ADICIONAR NOVOS BREAKPOINTS (organize da MAIOR para MENOR largura):
+   @media (min-width: XXXX) and (max-width: YYYY) {
+       .chat-wrapper.normal-mode { width: ZZZpx; max-width: ZZZpx; }
+       .chat-container.normal-mode { width: ZZZpx; max-width: ZZZpx; }
+   }
+   
+   REGRA: min-width = px onde COMEÇA este tamanho
+          max-width = px anterior - 1 (ex: se próximo é 1700, use max-width: 1699px)
+===== */
+
+@media (min-width: 1900px) and (max-width: 4000px) {
+    /* Acima de 1900px: largura = 1300px */
+    .chat-wrapper.normal-mode {
+        width: 1300px;
+        max-width: 1300px;
+    }
+    .chat-container.normal-mode {
+        width: 1300px;
+        max-width: 1300px;
+    }
+}
+
+@media (min-width: 1700px) and (max-width: 1899px) {
+    /* De 1700px até 1899px: largura = 1200px */
+    .chat-wrapper.normal-mode {
+        width: 1200px;
+        max-width: 1200px;
+    }
+    .chat-container.normal-mode {
+        width: 1200px;
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1550px) and (max-width: 1699px) {
+    /* De 1550px até 1699px: largura = 1100px */
+    .chat-wrapper.normal-mode {
+        width: 1100px;
+        max-width: 1000px;
+    }
+    .chat-container.normal-mode {
+        width: 1100px;
+        max-width: 1100px;
+    }
+    .message-content {
+        max-width: 90% !important;
+    }
+}
+
+@media (min-width: 1400px) and (max-width: 1549px) {
+    /* De 1400px até 1549px: largura = 1000px */
+    .chat-wrapper.normal-mode {
+        width: 1000px;
+        max-width: 900px;
+    }
+    .chat-container.normal-mode {
+        width: 1000px;
+        max-width: 1000px;
+    }
+    .message-content {
+        max-width: 95% !important;
+    }
+}
+
+@media (max-width: 1399px) {
+    /* Abaixo de 1400px: expandir ao máximo */
+    .message-content {
+        max-width: 98% !important;
+    }
+}
+
+/* EXEMPLO - Descomente e ajuste para adicionar novo breakpoint:
+@media (min-width: 1600px) and (max-width: 1649px) {
+    De 1600px até 1649px: largura = 450px 
+    .chat-wrapper.normal-mode {
+        width: 450px;
+        max-width: 450px;
+    }
+    .chat-container.normal-mode {
+        width: 450px;
+        max-width: 450px;
+    }
+}
+*/
+
+@media (min-width: 1800px) {
+    /* Em desktops muito largos (> 1720px), fixar o tamanho total e centralizar */
+    .chat-main {
+        max-width: calc(1300px + 450px + 28px); /* chat + doc + gap */
+        margin: 0 auto;
+        width: fit-content;
+    }
+    .chat-container {
+        flex: 0 0 1300px;
+        width: 1300px;
+        max-width: 1300px;
+        min-width: auto;
+    }
+    /* Em desktops largos, mantemos o editor no fluxo mas com aparência flutuante */
+    .chat-sidebar-editor { position: static; right: auto; top: auto; }
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+    /* Não usar position:fixed aqui para evitar overlay; o editor participa do flexbox */
+    .chat-sidebar-editor { position: static; right: auto; top: auto; flex: 1 !important; width: 100% !important; max-width: 100% !important; height: 800px !important; }
+    .chat-editor-body { height: 800px !important; max-height: 800px !important; overflow: auto !important; flex: none !important; }
+    
+    /* Responsividade do input container */
+    .chat-input-container {
+        flex-direction: row;
+        gap: 0.5rem;
+        padding: 0.8rem;
+        margin: 0.4rem;
+    }
+    .chat-input {
+        min-height: 36px;
+        padding: 0.5rem 0.7rem;
+        font-size: 0.85rem;
+    }
+    .btn-send-chat {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        min-width: 80px;
+    }
+}
+
+/* Telas pequenas */
+@media (max-width: 600px) {
+    .chat-input-container {
+        padding: 0.6rem;
+        margin: 0.3rem;
+        gap: 0.5rem;
+    }
+    .chat-input {
+        min-height: 34px;
+        padding: 0.5rem 0.6rem;
+        font-size: 0.8rem;
+    }
+    .btn-send-chat {
+        padding: 0.5rem 0.8rem;
+        font-size: 0.8rem;
+        min-width: 70px;
+    }
+}
+
+.chat-main.editor-closed {
+    grid-template-columns: 1fr;
+    gap: 0;
+}
+
+/* Quando o editor estiver fechado, manter as dimensões 1325x800px */
+.chat-main.editor-closed .chat-container {
+    max-width: 1200px !important;
+    width: 1200px !important;
+    height: 800px !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border-radius: 0.75rem !important; /* manter cantos sutis externos */
+    border: 1px solid rgba(15,23,42,0.06) !important; /* borda sutil quando editor fechado */
+    transform: translateX(0) !important;
+}
+
+/* Badge de resumo para mensagens de resumo quando editor está fechado */
+.chat-main.editor-closed .chat-message.bot-resume .message-content::after {
+    content: '📋 Resumo';
+    display: block;
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--primary-color);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 3px;
+}
+
+/* Borda sutil envolvendo TODO o campo de mensagens (mensagens + input)
+   quando o editor lateral estiver fechado. Mantém alinhamento e arredondamento. */
+.chat-main.editor-closed .chat-wrapper {
+    border: 1px solid rgba(15,23,42,0.06);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    box-shadow: none;
+}
+
+/* Remove borda quando o editor lateral estiver aberto para aparência transparente */
+.chat-main:not(.editor-closed) .chat-wrapper {
+    border: none;
+    border-radius: 0.75rem;
+}
+
+/* Aplicar o MESMO layout (transparência e fundos) quando o editor/documentação estiver fechado */
+.chat-main.editor-closed .chat-wrapper {
+    border: none !important;
+    border-radius: 0.75rem !important;
+}
+
+.chat-main.editor-closed .chat-container,
+.chat-main.editor-closed .chat-messages,
+.chat-main.editor-closed .chat-input-area,
+.chat-main.editor-closed .chat-controls {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--text-primary) !important;
+}
+
+/* Quando o editor lateral estiver aberto, deixar o fundo do chat transparente
+   para que o layout principal mantenha aparência uniforme. A documentação lateral
+   permanece com `var(--surface)` conforme ajustado acima. */
+.chat-main:not(.editor-closed) .chat-container,
+.chat-main:not(.editor-closed) .chat-messages,
+.chat-main:not(.editor-closed) .chat-input-area,
+.chat-main:not(.editor-closed) .chat-controls {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--text-primary) !important;
+}
+
+/* Remove o efeito de desfoque para evitar a aparência “borrada” do fundo */
+.chat-main:not(.editor-closed) .chat-messages,
+.chat-main.editor-closed .chat-messages {
+    backdrop-filter: none;
+}
+
+/* Deslocar a área de digitar para baixo quando o editor lateral estiver aberto
+   para alinhar verticalmente com o painel de documentação. */
+.chat-main:not(.editor-closed) .chat-input-area {
+    /* Mantém padding padrão do container; não move o header */
+    padding: 8px 12px 12px 12px !important;
+}
+
+/* Apenas deslocar o wrapper interno do input (onde fica textarea)
+   para baixo, sem alterar padding do container nem o header */
+.chat-main:not(.editor-closed) .input-wrapper {
+    margin-top: 0 !important; /* remover deslocamento forçado para evitar sobreposição */
+}
+
+/* quando editor estiver fechado, não adicionar deslocamento */
+.chat-main.editor-closed .input-wrapper {
+    margin-top: 0 !important;
+}
+
+/* Se for necessário um espaçamento visual em telas largas, usar padding interno
+   em vez de margin-top para evitar que o input atravesse outros elementos. */
+@media (min-width: 1200px) {
+    .chat-input-area { padding-top: 8px !important; }
+}
+
+@media (max-width: 900px) {
+    /* Stack chat and editor vertically on small screens instead of hiding the editor */
+    .chat-main {
+        flex-direction: column;
+        gap: 12px;
+        margin: 0 auto;
+    }
+    .chat-container {
+        width: 1620px;
+        max-width: 1620px;
+        height: 800px;
+        max-height: 800px;
+    }
+    .chat-sidebar-editor {
+        display: block !important;
+        flex: 0 0 auto;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+        margin: 0;
+    }
+    /* Simplify neon border on small screens to avoid clipping */
+    .chat-wrapper::before { display: none !important; }
+}
+
+/* Sidebar editor sizing in desktop/layout modes */
+.chat-sidebar-editor {
+    /* Garantir sizing coerente quando participa do flex-row */
+    flex: 0 0 450px;
+    max-width: 450px;
+    min-width: 260px;
+    box-sizing: border-box;
+}
+
+/* reduzir espaço interno do header das controls para ficar mais compacto */
+.chat-main:not(.editor-closed) .chat-controls {
+    padding: 6px 10px !important;
+}
+
+/* esconder a versão duplicada dentro do chat; usar o botão da navbar */
+#chatSettingsBtn { display: none !important; }
+.chat-container .chat-controls #chatSettingsBtn { display: none !important; }
+
+/* (Removido: alinhamento horizontal que causava visual indesejado) */
+
+/* Tornar o cabeçalho do Chat IA transparente quando o editor lateral estiver aberto */
+body:not(.chat-editor-closed) .navbar,
+body:not(.chat-editor-closed) .navbar-container.chat-navbar {
+    background: transparent !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+    color: var(--text-primary) !important;
+}
+
+/* Esconder o rodapé da documentação dentro do editor lateral quando aberto */
+.chat-sidebar-editor.open .chat-editor-footer {
+    display: none !important;
+}
+
+/* Esconder botão de enviar e expandir textarea para ocupar o espaço */
+body:not(.chat-editor-closed) .btn-send-chat,
+body:not(.chat-editor-closed) #chatSendBtn {
+    display: none !important;
+}
+
+body:not(.chat-editor-closed) .input-wrapper {
+    display: flex !important;
+    gap: 0 !important;
+    align-items: center !important;
+}
+
+body:not(.chat-editor-closed) .chat-input,
+body:not(.chat-editor-closed) #chatInput {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding-right: 12px !important; /* dar espaço interno */
+}
+
+/* Garantir legibilidade do placeholder/texto quando transparente */
+body:not(.chat-editor-closed) .chat-input::placeholder,
+body:not(.chat-editor-closed) #chatInput::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.9 !important;
+}
+
+/* Tornar o botão de enviar sempre oculto e fixar o campo de digitar */
+
+.btn-send-chat,
+ #chatSendBtn {
+    display: none !important;
+}
+
+/* Forçar layout do wrapper e do textarea para ocupar todo o espaço
+   e impedir redimensionamento pelo usuário manualmente. Permitimos
+   crescimento automático via JS até um limite (aprox. 5 linhas). */
+.input-wrapper {
+    display: flex !important;
+    gap: 0 !important;
+    align-items: center !important;
+}
+
+.chat-input,
+ #chatInput {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 12px 14px !important;
+    resize: none !important;
+    height: auto !important;
+    min-height: 48px !important;
+    max-height: 120px !important; /* limite responsivo ~5 linhas */
+    overflow: auto !important;
+    box-sizing: border-box !important;
+    border-radius: 8px !important;
+}
+
+.chat-input-area {
+    padding: 18px 16px !important; /* desloca um pouco para baixo */
+}
+
+/* Placeholder legível em ambos estados */
+.chat-input::placeholder,
+#chatInput::placeholder {
+    color: var(--text-secondary) !important;
+    opacity: 0.9 !important;
+}
+
+@media (max-width: 900px) {
+    .chat-main { display: block; margin: 0 auto; }
+    .chat-container { width: 1200px; max-width: 1200px; height: 800px; max-height: 800px; }
+    .chat-sidebar-editor { display: none; }
+}
+
+/* Toggle button for sidebar */
+.chat-editor-toggle {
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(15,23,42,0.12);
+    font-weight: 700;
+}
+.top-actions .chat-editor-toggle { display:inline-flex; align-items:center; justify-content:center; }
+.chat-sidebar-editor.open { transform: translateX(0); }
+
+/* botão de limpar no cabeçalho do Chat IA (pequeno, alinhado com ações) */
+.navbar-container.chat-navbar .btn-clear-top {
+    background: transparent;
+    border: 1px solid rgba(0,0,0,0.06);
+    color: inherit;
+    padding: 6px 8px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-weight: 700;
+}
+.navbar-container.chat-navbar .btn-clear-top:hover { background: rgba(0,0,0,0.04); }
+.navbar-container.chat-navbar .btn-clear-top:active { transform: translateY(1px); }
+
+/* tornar o ícone mais visível quando o modo é aplicado */
+body.chat-mode-normal .navbar-container.chat-navbar .btn-clear-top { border-color: rgba(99,102,241,0.18); }
+body.chat-mode-passo .navbar-container.chat-navbar .btn-clear-top { border-color: rgba(139,92,246,0.18); }
+
+/* --- Chat IA navbar elements: style local ao Chat IA (cinza por padrão) --- */
+.navbar-container.chat-navbar .navbar-title,
+.navbar-container.chat-navbar .logo-icon,
+.navbar-container.chat-navbar #chatEditorToggle,
+.navbar-container.chat-navbar .btn-ai-settings,
+.navbar-container.chat-navbar #aiSettingsBtn {
+    color: #374151; /* cinza escuro por padrão */
+    opacity: 0.95;
+}
+
+/* Botão de voltar: fundo apagado e texto branco por padrão; ao abrir a doc, fundo muda para a cor do modo */
+#chatBackBtn.btn-chat-back,
+.navbar-container.chat-navbar .btn-chat-back {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #ffffff;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.3);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.22);
+    font-weight: 700;
+    min-width: 92px;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    z-index: 999 !important;
+}
+.navbar-container.chat-navbar .btn-chat-back span { color: inherit; font-weight: 700; }
+
+body.chat-mode-normal .navbar-container.chat-navbar .btn-chat-back { background: var(--primary-color); color: #ffffff; }
+body.chat-mode-passo .navbar-container.chat-navbar .btn-chat-back { background: var(--secondary-color); color: #ffffff; }
+
+/* Ajustes finos para o botão voltar: manter texto branco, sem brilho, e borda sutil quando necessário */
+.navbar-container.chat-navbar .btn-chat-back:focus,
+.navbar-container.chat-navbar .btn-chat-back:hover {
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+}
+
+/* Quando a documentação do Chat IA estiver aberta, aplicamos a cor do modo no escopo do Chat IA */
+/* Aplicar cor do modo apenas aos elementos do cabeçalho (EXCETO o botão voltar, que usa texto branco) */
+body.chat-mode-normal .navbar-container.chat-navbar .navbar-title,
+body.chat-mode-normal .navbar-container.chat-navbar .logo-icon,
+body.chat-mode-normal .navbar-container.chat-navbar #chatEditorToggle,
+body.chat-mode-normal .navbar-container.chat-navbar .btn-ai-settings,
+body.chat-mode-normal .navbar-container.chat-navbar #aiSettingsBtn {
+    color: var(--primary-color);
+}
+
+body.chat-mode-passo .navbar-container.chat-navbar .navbar-title,
+body.chat-mode-passo .navbar-container.chat-navbar .logo-icon,
+body.chat-mode-passo .navbar-container.chat-navbar #chatEditorToggle,
+body.chat-mode-passo .navbar-container.chat-navbar .btn-ai-settings,
+body.chat-mode-passo .navbar-container.chat-navbar #aiSettingsBtn {
+    color: var(--secondary-color);
+}
+
+/* Forçar texto branco no botão Voltar quando em modo (evita herança de cor que o torna invisível) */
+body.chat-mode-normal .navbar-container.chat-navbar .btn-chat-back,
+body.chat-mode-passo .navbar-container.chat-navbar .btn-chat-back {
+    color: #ffffff !important;
+}
+
+/* Ajustes visuais adicionais: tornar o botão toggle cinza quando fechado e colorido quando em modo */
+.navbar-container.chat-navbar #chatEditorToggle { background: transparent; color: inherit; padding:6px 8px; border-radius:8px; border: 3px solid rgba(0,0,0,0.08); box-shadow: none; }
+/* Tornar ícone mais visível quando em modo: fundo levemente tinturado e borda fina com cor do modo */
+.body-placeholder{}
+.body-placeholder{}
+body.chat-mode-normal .navbar-container.chat-navbar #chatEditorToggle { background: rgba(99,102,241,0.12); color: var(--primary-color); border-color: rgba(99,102,241,0.36); border-width: 3px; border-style: solid; }
+body.chat-mode-passo .navbar-container.chat-navbar #chatEditorToggle { background: rgba(139,92,246,0.12); color: var(--secondary-color); border-color: rgba(139,92,246,0.36); border-width: 3px; border-style: solid; }
+.navbar-container.chat-navbar #chatEditorToggle:hover { transform: translateY(-1px); }
+
+/* alternativa: borda mais fina que a do chat-wrapper, mas visualmente coerente */
+.navbar-container.chat-navbar #chatEditorToggle.small-border { border-width: 1px; }
+
+/* Garantir que essas regras só afetem o cabeçalho do Chat IA e não o site todo */
+.navbar-container.chat-navbar .btn-chat-back svg { stroke: currentColor; }
+
+/* Animação sutil de entrada quando o modo é aplicado (fade + leve elevação) */
+@keyframes chatModeFadeIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.995); filter: blur(2px); }
+    to { opacity: 1; transform: translateY(0) scale(1); filter: none; }
+}
+
+/* Aplicar transições gerais a elementos que mudam de cor para suavizar a troca */
+.navbar-container.chat-navbar .btn-chat-back,
+.navbar-container.chat-navbar .navbar-title,
+.navbar-container.chat-navbar .logo-icon,
+.navbar-container.chat-navbar #chatEditorToggle,
+.chat-wrapper::before,
+.chat-message.user .message-content {
+    transition: background-color 360ms cubic-bezier(.2,.9,.2,1), border-color 360ms cubic-bezier(.2,.9,.2,1), color 360ms ease, box-shadow 360ms ease, transform 360ms ease, opacity 360ms ease;
+}
+
+/* Quando o modo é ativado, animar entrada desses elementos */
+body.chat-mode-normal .navbar-container.chat-navbar .btn-chat-back,
+body.chat-mode-passo .navbar-container.chat-navbar .btn-chat-back,
+body.chat-mode-normal .navbar-container.chat-navbar #chatEditorToggle,
+body.chat-mode-passo .navbar-container.chat-navbar #chatEditorToggle,
+body.chat-mode-normal .chat-wrapper::before,
+body.chat-mode-passo .chat-wrapper::before,
+body.chat-mode-normal .chat-message.user .message-content,
+body.chat-mode-passo .chat-message.user .message-content {
+    animation: chatModeFadeIn 360ms cubic-bezier(.2,.9,.2,1) both;
+}
+
+/* Pequeno delay encadeado para o border pseudo-element garantir suavidade visual */
+body.chat-mode-normal .chat-wrapper::before,
+body.chat-mode-passo .chat-wrapper::before {
+    animation-delay: 40ms;
+}
+
+/* centralizar abas do editor dentro do cabeçalho */
+.chat-editor-header {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:64px;
+    padding:0 12px;
+    box-sizing: border-box;
+    position: relative; /* permite centralizar absolutamente as abas */
+}
+
+/* posicionar abas exatamente no centro, independente de ações à direita */
+.chat-editor-header .editor-tabs {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display:flex;
+    gap:8px;
+    margin: 0;
+}
+
+.chat-editor-header .editor-actions {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+}
+
+.chat-editor-header .editor-tabs .editor-tab { padding:8px 14px; border-radius:8px; }
 
 .navbar-logo {
     display: flex;
@@ -265,6 +1928,73 @@ body.modal-open html {
 
 .btn-chat-back:active {
     transform: translateY(0);
+}
+
+/* ========================= */
+/* Regras adicionais de responsividade vertical
+   Garante que o chat e o editor se ajustem corretamente
+   em larguras e alturas reduzidas sem overflow indesejado */
+/* ========================= */
+
+/* Base: limitar altura total dos painéis ao espaço visível disponível */
+.chat-main, .chat-container, .chat-sidebar-editor {
+    box-sizing: border-box;
+}
+
+.chat-container, .chat-sidebar-editor {
+    max-height: calc(100vh - 120px); /* considerar navbar + margens */
+    overflow: hidden; /* internal scrolling control abaixo */
+}
+
+.chat-messages {
+    /* messages podem rolar internamente sem expandir o container */
+    max-height: calc(100vh - 280px);
+    overflow: auto;
+}
+
+.chat-sidebar-editor .chat-editor-body {
+    max-height: calc(100vh - 220px);
+    overflow: auto;
+}
+
+/* Quando a janela ficar mais estreita, empilhar verticalmente
+   e garantir que cada painel ajuste sua altura corretamente */
+@media (max-width: 900px) {
+    .chat-main {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: stretch;
+        margin: 0 auto;
+    }
+    .chat-container {
+        width: 1200px;
+        max-width: 1200px;
+        height: 800px;
+        max-height: 800px;
+    }
+    .chat-messages { max-height: calc(800px - 120px); }
+    .chat-sidebar-editor {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 800px;
+        overflow: auto;
+    }
+}
+
+/* Medium screens: permitir ambos lado-a-lado, mas limitar alturas para evitar overflow vertical */
+@media (min-width: 901px) and (max-width: 1200px) {
+    .chat-container { width: 1200px; max-width: 1200px; height: 800px; max-height: 800px; }
+    .chat-sidebar-editor { max-width: 36%; flex-basis: 36%; max-height: 800px; }
+    .chat-messages { max-height: calc(800px - 120px); }
+    .chat-sidebar-editor .chat-editor-body { max-height: calc(800px - 100px); }
+}
+
+/* Em telas muito altas/estreitas, permitir algum encolhimento mínimo para evitar overflow */
+@media (max-height: 640px) {
+    .chat-messages { max-height: calc(100vh - 200px); }
+    .chat-sidebar-editor .chat-editor-body { max-height: calc(100vh - 160px); }
 }
 
 .btn-chat-back svg {
@@ -537,19 +2267,20 @@ body.modal-open html {
 
 .category-item.reordering-mode {
     cursor: move;
-    border: 2px solid var(--primary-color);
-    background-color: rgba(99, 102, 241, 0.15);
     user-select: none;
+    position: relative;
+    outline: 3px solid var(--primary-color);
+    outline-offset: -3px;
+    transition: none;
 }
 
 .category-item.dragging {
-    opacity: 0.5;
-    transform: scale(0.98);
+    opacity: 1;
+    transform: none;
 }
 
 .category-item.drag-over {
-    border-top: 3px solid var(--primary-color);
-    padding-top: calc(0.5rem - 3px);
+    box-shadow: none;
 }
 
 .reorder-actions {
@@ -699,6 +2430,17 @@ body.modal-open html {
     display: block;
 }
 
+/* Forçar layout flexível especificamente para a seção de chat
+   (sobrepõe `style="display:block"` inline quando necessário) */
+section#chat.content-section {
+    display: flex !important;
+    flex-direction: row;
+    justify-content: space-between; /* separa os 2 elementos nas extremidades */
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap; /* permite quebra em telas pequenas */
+}
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -812,7 +2554,29 @@ body.modal-open html {
     color: #fff !important;
 }
 
-/* Em telas pequenas manter comportamento anterior */
+/* Em telas pequenas (859px) - botão de nova documentação abaixo com mesma largura */
+@media (max-width: 859px) {
+    .search-header .search-container { 
+        flex-direction: column; 
+        gap: 0.75rem; 
+        align-items: stretch;
+    }
+    .search-actions { 
+        margin-left: 0; 
+        width: 100%; 
+        justify-content: flex-start;
+        gap: 0.5rem;
+    }
+    #quickAddDocBtn { 
+        flex: 1;
+        width: 100%;
+    }
+    .search-header .search-input {
+        width: 100%;
+    }
+}
+
+/* Em telas muito pequenas (480px) manter comportamento anterior */
 @media (max-width: 480px) {
     .search-header .search-container { flex-direction: column; gap: 0.5rem; }
     .search-actions { margin-left: 0; width: 100%; justify-content: space-between; }
@@ -834,6 +2598,13 @@ body.modal-open html {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.search-input:disabled {
+    opacity: 1 !important;
+    color: var(--text-primary);
+    background-color: var(--surface);
+    cursor: text;
 }
 
 .search-btn {
@@ -873,14 +2644,7 @@ body.modal-open html {
 }
 
 
-.docs-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem; /* Reduzido para menos espaço entre linhas */
-    padding: 1rem 0.5rem 3rem 0.5rem; /* Adicionado padding-top para baixar primeira linha */
-    max-height: 80vh;
-    overflow-y: auto;
-}
+/* .docs-container removed - conflictadacom definições abaixo */
 
 .docs-container.list-view {
     grid-template-columns: 1fr;
@@ -915,19 +2679,20 @@ body.modal-open html {
 
 .doc-card.reordering-mode {
     cursor: move;
-    border: 2px solid var(--primary-color);
-    background-color: rgba(99, 102, 241, 0.15);
     user-select: none;
+    position: relative;
+    outline: 3px solid var(--primary-color);
+    outline-offset: -3px;
+    transition: none;
 }
 
 .doc-card.dragging {
-    opacity: 0.5;
-    transform: scale(0.98);
+    opacity: 1;
+    transform: none;
 }
 
 .doc-card.drag-over {
-    border-top: 3px solid var(--primary-color);
-    padding-top: calc(1.5rem - 3px);
+    box-shadow: none;
 }
 
 .doc-card.list-view {
@@ -1113,7 +2878,9 @@ body.modal-open html {
 }
 
 .btn-primary:hover {
-    background-color: var(--secondary-color);
+    /* Manter a mesma cor primária no hover (sem escurecer)
+       para que o botão azul fique sempre azul uniforme. */
+    background-color: var(--primary-color);
 }
 
 .btn-secondary {
@@ -1214,7 +2981,8 @@ body.modal-open html {
     height: 100%;
     background-color: rgba(0, 0, 0, 0.5);
     animation: fadeIn 0.3s ease;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .modal.show {
@@ -1238,26 +3006,70 @@ body.modal-open html {
 /* DOC MODAL: centralizar e fixar tamanho, truncar título e rolagem interna */
 #docModal.modal.show { display: flex; align-items: center; justify-content: center; }
 #docModal .modal-content { width: 760px; max-width: 95%; height: 96vh; max-height: 96vh; margin: 0; overflow: hidden; }
-#docModal .modal-header { display: flex; align-items: center; justify-content: center; padding: 1.4rem 1rem 0.6rem 1rem; border-bottom: 1px solid var(--border-color); }
+#docModal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* reduzir espaço superior para elevar visualmente o título */
+    padding: 0.6rem 1rem 0.2rem 1rem;
+    /* borda mais sutil para não 'empurrar' o conteúdo para baixo */
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+/* Tornar a borda da documentação nítida e o canto esquerdo reto para separar visualmente do conteúdo */
+#docModal .modal-content {
+    /* Remover borda ao abrir documentação em leitura; manter leve sombra */
+    border: none;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+    border-radius: 0.75rem;
+    background-clip: padding-box;
+}
 #docModal .modal-header h2 { margin: 0; font-size: 1.15rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 180px); }
-/* header-top em coluna: botões no topo (alinhados à direita) e título abaixo, centralizado */
+/* header-top: título centralizado de verdade, ações no canto direito */
 #docModal .modal-content .modal-header-top {
     position: relative;
-    top: 0;
-    right: 0;
-    left: 0;
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.6rem 1rem;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 0.9rem 1rem;
     z-index: 30;
 }
 
 #docModal .modal-header-top .header-actions {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
+    position: relative;
     width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+#docModal .modal-header-top .modal-title-row {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    pointer-events: none;
+    width: min(100%, calc(100% - 240px));
+}
+
+#docModal .modal-header-top .modal-title-row h2 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+#docModal .modal-header-top .header-actions .close-modal-top {
+    margin-left: 0.25rem;
 }
 
 #docModal .modal-title-center {
@@ -1265,12 +3077,14 @@ body.modal-open html {
     justify-content: center;
     align-items: center;
     width: 100%;
-    padding-top: 6px;
+    padding-top: 2px; /* título mais próximo do topo */
+    padding-bottom: 6px; /* espaço interno antes do conteúdo */
 }
 
 #docModal .modal-title-center #modalTitle {
     margin: 0;
-    font-size: 1.15rem;
+    font-size: 1.18rem; /* leve aumento para legibilidade */
+    line-height: 1.15;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1281,20 +3095,60 @@ body.modal-open html {
 #docModal .modal-version-toggle .version-btn { flex: 1; padding: 0.9rem 1rem; margin: 0 0.25rem; border-radius: 0.6rem; font-weight: 700; }
 #docModal .modal-version-toggle .version-btn[data-version="passo"] { color: #fff !important; }
 #docModal .modal-body { padding: 1rem 1.25rem; overflow: auto; max-height: calc(90vh - 160px); }
-#docModal .modal-text-content { white-space: pre-wrap; word-wrap: break-word; }
+#docModal .modal-text-content {
+    /* Preservar quebras de linha e espaços tal como no editor */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.6;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+#docModal .modal-text-content p,
+#docModal .modal-text-content ul,
+#docModal .modal-text-content ol,
+#docModal .modal-text-content li {
+    margin: 0.25rem 0;
+}
+#docModal .modal-text-content h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0.35rem 0 0.15rem;
+}
+#docModal .modal-text-content h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0.25rem 0 0.1rem;
+}
+#docModal .modal-text-content strong { font-weight: 700; }
+#docModal .modal-text-content em { font-style: italic; }
+#docModal .modal-text-content u { text-decoration: underline; }
 
 /* Garantir que imagens e blocos não escapem */
-#docModal .modal-text-content img { max-width: 100%; height: auto; display: block; }
+#docModal .modal-text-content img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 1rem 0;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+#docModal .modal-text-content .doc-image-placeholder-wrapper {
+    display: block;
+    width: 100%;
+    margin: 0.4rem 0 0.1rem;
+}
 #docModal .modal-text-content pre, #docModal .modal-text-content code { max-width: 100%; overflow: auto; }
 
 
 
 #categoryModal .modal-content {
     max-width: 520px;
+    width: min(92vw, 520px);
     padding: 1rem 1rem 1.25rem 1rem;
     border-radius: 0.75rem;
     background: var(--surface);
-    
+    max-height: min(88vh, 560px);
+    overflow-y: auto;
 }
 
 
@@ -1343,20 +3197,239 @@ body.modal-open html {
 
 #categoryModal .modal-content { opacity: 1; }
 
+/* Refinamento visual: modal de criar/editar categoria mais arredondado, maior e alinhado */
+#categoryModal .modal-content {
+    border-radius: 20px;
+    box-shadow: 0 26px 60px rgba(2,6,23,0.18);
+    padding: 1.4rem 1.5rem;
+    width: 540px;
+    max-width: 95%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
+    border: none; /* remover linha superior/borda */
+}
 
-#toastContainer {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
+#categoryModal .modal-header-top { border-bottom: none; padding-bottom: 0.6rem; }
+#categoryModal h2#categoryModalTitle { font-size: 1.45rem; font-weight: 900; color: var(--primary-color); text-align: center; padding: 0.2rem 0; }
+
+#categoryModal .form-container { background: transparent; padding: 0; box-shadow: none; }
+
+#categoryModal .form-group input[type="text"],
+#categoryModal .form-group input[type="color"],
+#categoryModal .form-group input[readonly],
+#categoryModal .form-group select {
+    width: 100%;
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(15,23,42,0.06);
+    background: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(0,0,0,0.01));
+    color: var(--text-primary);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+    font-size: 1rem;
+}
+
+#categoryModal #categoryIcon[readonly] { display: inline-flex; width: 92px; height: 52px; align-items: center; justify-content: center; border-radius: 12px; padding: 0; font-size: 1.8rem; box-shadow: 0 6px 18px rgba(2,6,23,0.08); }
+
+#categoryModal .form-actions { display: flex; gap: 0.8rem; justify-content: center; margin-top: 1rem; }
+
+#categoryModal .modal-content .btn-primary { border-radius: 12px; box-shadow: 0 14px 34px rgba(99,102,241,0.14); font-size: 1rem; }
+#categoryModal .modal-content .btn-secondary { border-radius: 12px; background: var(--surface); border: 1px solid var(--border-color); font-size: 0.98rem; }
+
+/* Equalizar botões: mesma largura e altura */
+#categoryModal .form-actions .btn-primary,
+#categoryModal .form-actions .btn-secondary {
+    min-width: 160px;
+    height: 48px;
+    padding: 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#categoryModal .form-group label { display: block; margin-bottom: 0.35rem; font-weight: 800; color: var(--text-primary); font-size: 0.95rem; }
+
+/* melhorar foco acessível */
+#categoryModal .form-group input:focus, #categoryModal .form-group select:focus {
+    outline: none;
+    box-shadow: 0 0 0 6px rgba(99,102,241,0.08);
+    border-color: var(--primary-color);
+}
+
+/* Remove o efeito de desfoque do fundo dos modais */
+.modal {
+    background-color: rgba(0, 0, 0, 0.45);
+    backdrop-filter: none;
+}
+
+#deleteCategoryConfirmModal .modal-content {
+    max-width: 460px;
+    width: 100%;
+    padding: 1.25rem 1.5rem 1.5rem;
+    border-radius: 1rem;
+}
+
+#deleteCategoryConfirmModal.modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#deleteCategoryConfirmModal .modal-content {
+    max-width: 460px;
+    width: 100%;
+    padding: 1.25rem 1.5rem 1.5rem;
+    border-radius: 1rem;
+    margin: 0;
+}
+
+#deleteCategoryConfirmModal .delete-category-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(0,0,0,.08);
+}
+
+#deleteCategoryConfirmModal .delete-category-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+#deleteCategoryConfirmModal .delete-category-folder,
+#deleteCategoryConfirmModal .delete-category-triangle {
+    font-size: 1.65rem;
+    line-height: 1;
+}
+
+#deleteCategoryConfirmModal .delete-category-folder {
+    color: var(--primary-color);
+    margin: 0 0.4rem 0 0.25rem;
+}
+
+#deleteCategoryConfirmModal .delete-category-triangle {
+    color: var(--danger-color);
+    margin-right: 0.15rem;
+    transform: translateY(-1px);
+}
+
+#deleteCategoryConfirmModal #deleteCategoryConfirmTitle {
+    font-size: 1.55rem;
+    font-weight: 900;
+    color: var(--text-primary);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#deleteCategoryConfirmModal .btn-danger {
+    background-color: var(--danger-color) !important;
+    color: #fff !important;
+    border: none;
+}
+
+#deleteCategoryConfirmModal .btn-secondary {
+    background-color: var(--surface) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
+}
+
+#deleteCategoryConfirmModal .btn-secondary:hover {
+    border-color: var(--primary-color) !important;
+    color: var(--primary-color) !important;
+}
+
+#deleteCategoryConfirmModal .delete-category-body {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem 0 0;
+}
+
+#deleteCategoryConfirmModal #deleteCategoryConfirmMessage {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: 100%;
+}
+
+#deleteCategoryConfirmModal .delete-category-actions {
+    justify-content: center;
+    width: 100%;
+}
+
+#deleteCategoryConfirmModal .btn-secondary,
+#deleteCategoryConfirmModal .btn-danger {
+    min-width: 140px;
+    border-radius: 0.7rem;
+    padding: 0.85rem 1.1rem;
+    font-size: 0.98rem;
+}
+
+#deleteCategoryConfirmModal .btn-danger {
+    background-color: var(--danger-color);
+    color: #fff;
+    border: none;
+}
+
+#deleteCategoryConfirmModal .btn-danger:hover {
+    background-color: #dc2626;
+}
+
+#deleteCategoryConfirmModal .btn-secondary {
+    background-color: rgba(255,255,255,.96);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+#deleteCategoryConfirmModal .btn-secondary:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+#docModal .modal-title-center #modalTitle {
+    margin: 0;
+    font-size: 1.15rem;
+    color: var(--primary-color); /* manter mesma cor que quando não havia doc aberto */
+    white-space: nowrap;
+    overflow: hidden;
     z-index: 3000;
     display: flex;
+
+/* Garantir que ícones e botões no header do modal de doc mantenham cor primária
+   para ficar igual ao estado sem o modal aberto */
+#docModal .modal-header-top .header-actions svg,
+#docModal .modal-header-top .header-actions button,
+#docModal .modal-header-top .header-actions .btn-edit-top {
+    color: var(--primary-color) !important;
+    fill: currentColor !important;
+}
     flex-direction: column;
     gap: 0.5rem;
     max-width: 500px;
     width: 100%;
     padding: 1rem;
     margin: 0 auto;
+    pointer-events: none;
+}
+
+#toastContainer {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 2rem);
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    z-index: 9999;
     pointer-events: none;
 }
 
@@ -1427,6 +3500,20 @@ body.modal-open html {
     }
 }
 
+/* Toast variants */
+.toast-success {
+    border-left-color: var(--success-color);
+}
+
+.toast-error {
+    border-left-color: var(--danger-color);
+    background: linear-gradient(180deg, rgba(255,240,240,0.9), rgba(255,250,250,0.9));
+}
+
+.toast-error .toast-progress-bar {
+    background: var(--danger-color);
+}
+
 
 #iconPalette { padding: 0.5rem 0; }
 #iconPalette .icon-choice {
@@ -1440,6 +3527,10 @@ body.modal-open html {
 }
 #iconPalette .icon-choice:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
 
+    .chat-message.bot .message-content:hover,
+    .chat-message.bot-resume .message-content:hover {
+        transition: transform 3000ms cubic-bezier(.16,.85,.18,1), box-shadow 3000ms cubic-bezier(.16,.85,.18,1), background 3000ms ease;
+    }
 
 .icon-popover {
     background: var(--surface);
@@ -1522,32 +3613,27 @@ button.btn-cancel {
 
 
 .modal-content.modal-content-large {
-    display: flex;
-    flex-direction: column;
-    max-height: calc(100vh - 30px);
-    overflow: hidden;
+    display: block; /* allow the modal to grow with content */
     padding: 1.25rem 1.5rem;
     position: relative;
-    top: auto;
-    left: auto;
-    transform: none;
     width: 90%;
     max-width: 900px;
-    height: 92vh;
     margin: 0 auto;
+    max-height: none;
+    overflow: visible;
 }
 
 
 .modal-content.modal-content-large .form-container {
-    max-height: calc(92vh - 120px);
-    overflow-y: auto;
+    max-height: none;
+    overflow: visible; /* let the form expand and push the page */
     padding: 1rem;
 }
 
 
 .modal-content.modal-content-large .rich-editor {
-    max-height: calc(92vh - 220px);
-    overflow-y: auto;
+    max-height: none;
+    overflow: visible; /* allow editor to grow and page to scroll */
     background: var(--surface);
     border: 1px solid var(--border-color);
     padding: 0.6rem;
@@ -1573,8 +3659,30 @@ button.btn-cancel {
 }
 
 /* Centralizar modal de edição (#editModal) similar ao docModal */
-#editModal.modal.show { display: flex; align-items: center; justify-content: center; }
-#editModal .modal-content { width: 820px; max-width: 96%; height: 92vh; margin: 0; }
+#editModal.modal.show { display: flex; align-items: flex-start; justify-content: center; }
+#editModal .modal-content { width: 820px; max-width: 96%; margin: 1.5rem 0; }
+
+/* Quando o modal ocupa toda a largura do site, permitir scroll no body
+   e fazer o modal ocupar 100% da largura para empurrar a página. */
+.modal-content.expand-to-site {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+    left: 0 !important;
+}
+
+/* When expanding to site, allow the page to scroll even if body.modal-open is set */
+body.modal-open.modal-expanded-to-site {
+    overflow: visible !important;
+    position: static !important; /* remove fixed positioning so page can scroll */
+    width: auto !important;
+}
+
+/* Override html overflow when expanded */
+html.modal-expanded-to-site, html.modal-expanded-to-site body {
+    overflow: visible !important;
+}
 
 /* Editor toolbar/buttons styling */
 .editor-toolbar { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem; }
@@ -1589,6 +3697,328 @@ button.btn-cancel {
 }
 .editor-toolbar .editor-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
 .editor-toolbar .editor-btn.active, .edit-version-toggle .version-btn.active { background: var(--primary-color); color: #fff; border-color: var(--primary-color); }
+
+.format-popup {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.4rem 0.45rem;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.96);
+    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.26), 0 8px 16px rgba(15, 23, 42, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: none;
+    transition: transform 0.16s ease, opacity 0.16s ease;
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+    pointer-events: none;
+}
+
+.format-popup.visible {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+.format-popup .format-btn {
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    font-weight: 700;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    min-width: 38px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.format-popup .format-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.format-popup .format-btn.active {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.format-popup .format-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255,255,255,0.12);
+    margin: 0 0.25rem;
+}
+
+.mention-popup {
+    position: fixed;
+    z-index: 10001;
+    display: none;
+    min-width: 140px;
+    max-width: 190px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
+    padding: 0.08rem 0;
+    transition: opacity 0.14s ease, transform 0.14s ease;
+    opacity: 0;
+}
+
+.mention-popup.visible {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.mention-popup .mention-item {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: #f8fafc;
+    padding: 0.28rem 0.55rem;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-size: 0.82rem;
+}
+
+.mention-popup .mention-item strong {
+    font-weight: 700;
+    font-size: 0.86rem;
+}
+
+.mention-popup .mention-item:hover,
+.mention-popup .mention-item.active {
+    background: rgba(255,255,255,0.07);
+}
+
+.mention-popup .mention-item span {
+    opacity: 0.78;
+    font-size: 0.83rem;
+}
+
+.chat-active-prompts {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.15rem 0.3rem 0 0.3rem;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 6px;
+}
+
+.chat-active-prompts .active-prompts-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.active-prompt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.8rem;
+    line-height: 1;
+}
+
+.active-prompt-chip-icon {
+    min-width: 16px;
+    min-height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(99, 102, 241, 0.95);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.active-prompt-chip-label {
+    display: inline-block;
+    color: var(--text-primary);
+}
+
+.active-prompt-chip button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.88rem;
+    line-height: 1;
+    padding: 0;
+}
+
+.active-prompt-chip button:hover {
+    color: var(--danger-color);
+}
+
+.ai-commands-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.ai-command-row {
+    position: relative;
+    min-height: 260px;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.16);
+    border-radius: 18px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+}
+
+.ai-command-top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+
+.ai-command-name-wrapper,
+.ai-command-prompt-wrapper {
+    flex: 1 1 280px;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ai-command-prompt-wrapper {
+    flex: 1 1 auto;
+}
+
+.ai-command-label {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.ai-command-field {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.ai-command-prefix {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: rgba(99, 102, 241, 0.16);
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.ai-command-input,
+.ai-command-textarea,
+.ai-command-name {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.08);
+    color: #111827;
+    font-size: 0.95rem;
+    caret-color: #111827;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.ai-command-input::placeholder,
+.ai-command-textarea::placeholder {
+    color: rgba(17, 24, 39, 0.55);
+}
+
+.ai-command-input:focus,
+.ai-command-textarea:focus {
+    outline: none;
+    border-color: rgba(99, 102, 241, 0.7);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+body.dark-mode .ai-command-input,
+body.dark-mode .ai-command-textarea,
+body.dark-mode .ai-command-name {
+    background: rgba(255, 255, 255, 0.06);
+    color: #f9fafb;
+    caret-color: #f9fafb;
+}
+
+body.dark-mode .ai-command-input::placeholder,
+body.dark-mode .ai-command-textarea::placeholder {
+    color: rgba(249, 250, 251, 0.65);
+}
+
+.ai-command-textarea {
+    flex: 1 1 auto;
+    min-height: 180px;
+    resize: none;
+    width: 100%;
+    height: 100%;
+}
+
+#aiSystemPrompt.settings-textarea {
+    min-height: 260px;
+    resize: none;
+}
+
+.ai-command-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.ai-command-delete-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 10;
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: #ef4444;
+    border: none;
+    box-shadow: none;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.ai-command-delete-btn:hover {
+    color: #b91c1c;
+    background: rgba(248, 113, 113, 0.08);
+}
+
+.ai-command-row-empty {
+    color: var(--text-secondary);
+    padding: 14px 0;
+}
 
 /* H2/H3/B list buttons consistent size */
 .editor-toolbar .editor-btn[data-action="h2"],
@@ -1626,6 +4056,9 @@ button.btn-cancel {
     font-size: 1.8rem; 
     line-height: 2.2;
     text-align: left;
+    /* Preservar quebras de linha e espaçamentos como no editor */
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .modal-content.modal-fullscreen .modal-text-content img {
@@ -1678,20 +4111,143 @@ button.btn-cancel {
 }
 
 #editModal .modal-header-top {
-    position: sticky;
-    top: 0;
     background-color: var(--surface);
-    z-index: 10;
-    padding: 1rem;
+    padding: 6px 16px 10px 16px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
-    align-items: center;
-    gap: 1rem;
+    flex-direction: column;
+    align-items: stretch;
 }
 
-#editModal .modal-header-top h2 {
-    margin: 0;
-    font-size: 1.5rem;
+#editModal .modal-top-row {
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    position:relative;
+    min-height: 56px;
+}
+#editModal .modal-top-row .close-edit {
+    position:absolute;
+    left: 16px;
+    top: 12px;
+    z-index: 1;
+    order: 0;
+}
+#editModal .modal-top-row .action-buttons {
+    display:flex;
+    gap:0.75rem;
+    justify-content:center;
+    align-items:center;
+}
+#editModal .modal-top-row .action-buttons .wide-action-btn {
+    flex: 0 0 auto;
+}
+#editModal .modal-top-row button,
+#editModal .modal-top-row .close-edit {
+    min-height: 44px;
+    padding: 0.75rem 1rem;
+}
+#editModal .modal-top-row button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#editModal .modal-actions-row { margin-top:8px; display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+#editModal .modal-actions-row .edit-version-toggle { display:flex; gap:0.5rem; flex-wrap:wrap; }
+#editModal .modal-actions-row #sendEditToChatBtn { white-space:nowrap; }
+
+#editModal .modal-header-top .wide-action-btn {
+    flex: 1 1 auto;
+    min-width: 210px;
+    padding: 0.75rem 1rem;
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 2px solid var(--border-color);
+    border-radius: 0.75rem;
+    transition: all 0.25s ease;
+}
+
+#editModal .modal-header-top .wide-action-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background-color: var(--surface-hover);
+}
+
+#editModal .modal-header-top .btn-action-delete {
+    border-color: var(--danger-color);
+    color: var(--danger-color);
+}
+
+#editModal .modal-header-top .btn-action-delete:hover {
+    border-color: #dc2626;
+    color: #dc2626;
+    background-color: rgba(220, 38, 38, 0.08);
+}
+
+#editModal .modal-header-top .btn-primary,
+#editModal .modal-header-top .btn-danger,
+#editModal .modal-header-top .btn-secondary {
+    border-radius: 0.75rem;
+}
+
+#editModal .modal-header-top .close-edit {
+    border: 1px solid var(--border-color);
+    background-color: var(--surface);
+    color: var(--text-primary);
+    padding: 0.75rem 0.95rem;
+    border-radius: 0.75rem;
+    min-width: auto;
+}
+
+#editModal .modal-header-top .close-edit:hover {
+    background-color: var(--surface-hover);
+}
+
+#editModal .tag-input-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.75rem;
+    width: 100%;
+    align-items: stretch;
+}
+
+#editModal .tag-input-row input#editDocTags {
+    width: 100%;
+    min-width: 0;
+    padding: 1rem 1rem;
+}
+
+#editModal .btn-chat-ia {
+    min-width: 54px;
+    padding: 0 1rem;
+    font-size: 1.35rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#editModal .tag-row-group {
+    margin-bottom: 1.5rem;
+}
+
+#editModal .tag-row-group label {
+    margin-bottom: 0.5rem;
+}
+
+#editModal .btn-chat-ia {
+    min-width: 140px;
+    padding: 0.85rem 1.1rem;
+    border-radius: 0.5rem;
+}
+
+#editModal .edit-version-toggle .version-btn {
+    flex: 1 1 auto;
+}
+
+#editModal .modal-header-top {
+    background: var(--surface);
 }
 
 .modal-content.modal-fullscreen .rich-editor {
@@ -1859,6 +4415,44 @@ button.btn-cancel {
     border-top: 1px solid var(--border-color);
 }
 
+/* Edit modal header layout */
+.modal-header-top {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem 0.5rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+}
+.modal-header-top .actions-row {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:0.5rem;
+}
+.modal-header-top .actions-left { display:flex; gap:0.5rem; align-items:center; }
+.modal-header-top .actions-right { display:flex; gap:0.5rem; align-items:center; }
+.modal-header-top .info-row { display:flex; align-items:center; gap:1rem; }
+.modal-header-top .title-block h2 { font-size:1.05rem; margin:0; }
+.modal-header-top input#editDocTags { padding:6px 8px; border-radius:6px; border:1px solid var(--border-color); }
+
+@media (max-width:720px) {
+    .modal-header-top .info-row { flex-direction:column; align-items:flex-start; }
+    .modal-header-top .actions-left { flex-wrap:wrap; }
+}
+
+/* Make delete button more visible in modal header/actions */
+.modal-actions-row .btn-danger,
+.modal-header-top .btn-danger,
+.modal-header-top .delete-during-edit {
+    background: var(--danger-color);
+    color: #fff !important;
+    border: none;
+    padding: 6px 10px;
+    border-radius: 8px;
+}
+.modal-actions-row .btn-danger:hover { opacity: 0.95; }
+
 #modalTags {
     display: flex;
     flex-wrap: wrap;
@@ -1909,7 +4503,12 @@ button.btn-cancel {
     margin: 0.6rem 0 0.35rem 0;
 }
 .modal-text-content p { margin: 0.45rem 0; color: var(--text-secondary); }
-.modal-text-content ul, .modal-text-content ol { margin: 0.4rem 0 0.8rem 1.2rem; color: var(--text-secondary); }
+.modal-text-content ul, .modal-text-content ol {
+    margin: 0.4rem 0 0.8rem 0;
+    padding-left: 0;
+    list-style-position: inside;
+    color: var(--text-secondary);
+}
 .modal-text-content pre, .modal-text-content code {
     background: rgba(0,0,0,0.06);
     color: var(--text-primary);
@@ -1974,26 +4573,58 @@ button.btn-cancel {
 
 .chat-container {
     background: linear-gradient(135deg, var(--surface) 0%, rgba(99,102,241,0.02) 100%);
-    border-radius: 1rem;
+    border-radius: 6px 0 0 6px;
     box-shadow: var(--shadow-lg), 0 0 40px rgba(99,102,241,0.1);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    /* larger fixed size for more vertical space */
-    height: 820px;
-    min-height: 820px;
-    max-height: 820px;
-    flex: 0 0 820px;
+    /* Dimensões exatas fixas 1200x800px (não crescer) */
+    flex: 0 0 1200px;
+    width: 1200px;
     max-width: 1200px;
-    margin: 0 auto;
-    width: 100%;
+    height: 800px;
+    min-height: 800px;
+    max-height: 800px;
+    margin: 0;
     border: 1px solid rgba(99,102,241,0.15);
+}}
+
+/* Override quando editor estiver fechado: fundo igual ao da página e largura limitada */
+.chat-main.editor-closed .chat-container {
+    background: var(--background) !important;
+    max-width: 1100px !important;
+    width: calc(100% - 48px) !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border-radius: 0.75rem !important;
+    border: none !important;
+}
+
+/* Quando o editor estiver fechado: ajustar navbar e input para fundo da página */
+body.chat-editor-closed .navbar,
+body.chat-editor-closed .navbar-container.chat-navbar {
+    background: var(--background) !important;
+    border-bottom: none !important;
+    box-shadow: none !important;
+}
+
+body.chat-editor-closed .chat-input-area {
+    background: var(--background) !important;
+    border-top: none !important;
+}
+
+/* Ajustar borda do container para ter mesma cor sutil do resto */
+body.chat-editor-closed .chat-container {
+    border: 1px solid var(--border-color) !important;
 }
 
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 0.8rem 1rem 0.6rem 1rem; /* smaller bottom padding to bring messages closer to input */
+    padding-top: 0.8rem;
+    padding-right: 1.25rem;
+    padding-bottom: 0;
+    padding-left: 2.5rem;
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
@@ -2069,20 +4700,227 @@ button.btn-cancel {
     padding: 0.75rem 1.25rem;
     border-radius: 0.75rem;
     word-wrap: break-word;
+    font-size: 15px; /* tamanho de texto das mensagens (legível, próximo de assistants) */
+}
+
+.message-content strong {
+    font-weight: 800;
+    color: inherit;
+}
+
+.message-content em,
+.message-content i {
+    font-style: italic;
+}
+
+.message-content h1 {
+    font-size: 1.8rem;
+    font-weight: 800;
+    margin: 0.5rem 0 2rem 0;
+    line-height: 1.3;
+    color: inherit;
+}
+
+.message-content h2 {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0.5rem 0 1rem 0;
+    line-height: 1.3;
+    color: inherit;
+}
+
+.message-content h3 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin: 0.4rem 0 1rem 0;
+    line-height: 1.3;
+    color: inherit;
+}
+
+.message-content h4 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0.4rem 0 1rem 0;
+    line-height: 1.3;
+    color: inherit;
+}
+
+.message-content h5 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0.3rem 0 1rem 0;
+    line-height: 1.3;
+    color: inherit;
+}
+
+.message-content h6 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0.3rem 0 1rem 0;
+    line-height: 1.3;
+    color: inherit;
 }
 
 .chat-message.bot .message-content {
-    background-color: rgba(99,102,241,0.08);
-    color: var(--text-primary);
-    border-left: 4px solid var(--primary-color);
-    border-radius: 0.75rem;
+    background-color: transparent !important;
+    color: #e6e6e6 !important;
+    border: 2px solid #fbfeff !important; /* cor exata do fundo do site (topo do gradiente) */
+    border-radius: 12px !important;
+    padding: 0.5rem 0.65rem !important;
+    box-shadow: none !important;
+    /* mantém no mesmo lugar, sem transformação */
+    transform: translateY(0) rotateX(0) scale(1);
+    transform-origin: 50% 100%;
+    will-change: auto;
+    transition: border-color 250ms cubic-bezier(.2,.9,.2,1), background 250ms cubic-bezier(.2,.9,.2,1);
+}
+
+/* Remover transição quando selected */
+.chat-message.bot .message-content.selected {
+    transition: none !important;
+}
+
+.chat-message.bot .message-content:hover {
+    border-color: rgba(99,102,241,0.22) !important;
+}
+
+/* Estilo 3D especial para mensagens de resumo do bot */
+.chat-message.bot-resume {
+
+    /* Transição ultrarrápida ao sair do hover (deixar o elemento voltar ao estado inicial) */
+    .chat-message.bot .message-content:hover,
+    .chat-message.bot-resume .message-content:hover {
+        transition: transform 3000ms cubic-bezier(.16,.85,.18,1), box-shadow 3000ms cubic-bezier(.16,.85,.18,1), background 3000ms ease;
+    }
+    flex-direction: column;
+}
+
+/* SÓ quando editor está ABERTO - com toda estilização 3D */
+.chat-main:not(.editor-closed) .chat-message.bot-resume .message-content {
+    max-width: 85%;
+    width: fit-content;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.08)) !important;
+    border: 2px solid var(--primary-color) !important;
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3),
+                0 4px 12px rgba(99, 102, 241, 0.15),
+                0 8px 16px rgba(99, 102, 241, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    border-radius: 14px !important;
+    position: relative;
+    padding: 1rem 1.2rem !important;
+    transition: all 300ms ease;
+    filter: drop-shadow(0 2px 4px rgba(99, 102, 241, 0.1));
+}
+
+.chat-main:not(.editor-closed) .chat-message.bot-resume .message-content:hover {
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4),
+                0 6px 16px rgba(99, 102, 241, 0.2),
+                0 10px 20px rgba(99, 102, 241, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+    transform: translateY(-2px);
+    filter: drop-shadow(0 3px 6px rgba(99, 102, 241, 0.15));
+}
+
+/* OVERRIDE: remover bordas ao redor das respostas da IA (bot) e tornar conteúdo full-width */
+.chat-message.bot,
+.chat-message.bot-resume,
+.chat-message.pending {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+.chat-message.bot .message-content,
+.chat-message.bot-resume .message-content,
+.chat-message.pending .message-content {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+    border-radius: 6px !important;
+    color: var(--text-primary) !important;
+}
+
+/* Ajuste responsivo fino para telas pequenas */
+@media (max-width: 900px) {
+    .chat-message.bot .message-content,
+    .chat-message.bot-resume .message-content,
+    .chat-message.pending .message-content {
+        padding-left: 0.6rem !important;
+        padding-right: 0.6rem !important;
+    }
+}
+
+/* Destaque para mensagem de usuário que está sendo resumida - SÓ quando editor está aberto */
+.chat-main:not(.editor-closed) .chat-message.user.user-resume-input .message-content {
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.4),
+                0 6px 16px rgba(99, 102, 241, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(139, 92, 246, 0.03)) !important;
+    transition: all 200ms ease;
+}
+
+.resume-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: -0.8rem;
+    padding: 0;
+    visibility: hidden;
+}
+
+.chat-main:not(.editor-closed) .resume-actions {
+    visibility: visible;
+}
+
+.resume-action-btn {
+    background: none;
+    border: none;
+    color: var(--primary-color);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: all 150ms ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.resume-action-btn:hover:not(:disabled) {
+    color: var(--primary-color);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.resume-action-btn:active:not(:disabled) {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.resume-action-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
 }
 
 .chat-message.user .message-content {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-    color: white;
+    /* padrão: balão do usuário em cinza escuro quando a documentação estiver fechada */
+    background: #374151; /* cinza escuro agradável */
+    color: #ffffff;
     border-radius: 0.75rem;
-    box-shadow: 0 4px 12px rgba(99,102,241,0.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+/* Ajustar cor do balão da mensagem do usuário conforme o modo selecionado */
+body.chat-mode-normal .chat-message.user .message-content {
+    background: linear-gradient(135deg, rgba(79,70,229,0.7), rgba(99,102,241,0.6)) !important;
+    color: #ffffff !important;
+    box-shadow: 0 6px 18px rgba(79,70,229,0.28);
+}
+body.chat-mode-passo .chat-message.user .message-content {
+    background: linear-gradient(135deg, rgba(139,92,246,0.7), rgba(168,85,247,0.6)) !important;
+    color: #ffffff !important;
+    box-shadow: 0 6px 18px rgba(139,92,246,0.26);
 }
 
 .chat-message p {
@@ -2091,14 +4929,34 @@ button.btn-cancel {
 }
 
 .chat-input-area {
-    padding: 1rem;
-    border-top: 1px solid rgba(99,102,241,0.15);
-    background: linear-gradient(180deg, var(--surface) 0%, rgba(99,102,241,0.02) 100%);
+    padding: 0 1.25rem 1rem 2.5rem;
     display: flex;
     flex-direction: column;
     justify-content: flex-end; /* push input to the bottom */
-    flex: 0 0 150px; /* fixed height in px for easier tuning */
-    height: 150px;
+    flex: 1 1 auto; /* expande conforme o textarea cresce */
+    height: auto; /* se adapta ao conteúdo */
+}
+
+/* ===== CONTAINER DE INPUT DO CHAT: Textarea + Botão Enviar ===== */
+.chat-input-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 2px solid var(--border-color);
+    border-top: 1px solid var(--border-color);
+    border-radius: 0.75rem;
+    background-color: var(--surface);
+    margin: 0.5rem;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.chat-input-container:focus-within {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.05);
 }
 
 .input-wrapper {
@@ -2111,14 +4969,14 @@ button.btn-cancel {
 
 .chat-input {
     flex: 1;
-    padding: 0.75rem 1rem;
-    border: 2px solid rgba(99,102,241,0.2);
-    border-radius: 0.75rem;
-    font-size: 1rem;
+    padding: 0.6rem 0.85rem;
+    border: 1.5px solid var(--border-color);
+    border-radius: 0.5rem;
+    font-size: 0.9rem;
     background-color: var(--surface);
     color: var(--text-primary);
-    min-height: 44px;
-    max-height: 360px;
+    min-height: 38px;
+    max-height: 200px;
     height: auto;
     resize: vertical;
     width: 100% !important;
@@ -2126,6 +4984,7 @@ button.btn-cancel {
     overflow-y: auto;
     transition: all 0.2s ease;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.4;
 }
 
 .chat-input:focus {
@@ -2141,16 +5000,19 @@ button.btn-cancel {
 }
 
 .btn-send-chat {
-    padding: 0.75rem 1.5rem;
+    padding: 0.6rem 1.2rem;
     background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
     color: white;
     border: none;
     border-radius: 0.5rem;
     font-weight: 600;
+    font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.3s ease;
     box-shadow: 0 4px 12px rgba(99,102,241,0.2);
     white-space: nowrap;
+    align-self: flex-start;
+    min-width: 90px;
 }
 
 /* Chat overrides removed — restoring base styles (cleaned) */
@@ -2581,15 +5443,7 @@ html, body {
 
 .category-item .category-actions button:hover { background: rgba(15,23,42,0.04) !important; color: var(--mt-ink) !important; }
 
-/* Docs grid and cards */
-.docs-container {
-    display: grid !important;
-    grid-template-columns: repeat(3, 1fr) !important;
-    gap: 20px !important;
-    padding: 18px !important;
-    align-items: start !important;
-    overflow-x: hidden !important;
-}
+/* REMOVIDA - conflitava com definição base correta no final */
 
 .doc-card {
     background: linear-gradient(180deg,#ffffff 0%, #fbfbff 100%) !important;
@@ -2611,7 +5465,40 @@ html, body {
 .doc-title { font-size:1.05rem !important; font-weight:800 !important; margin:8px 0 6px 0 !important; color:var(--mt-ink) !important; }
 .doc-description { color:var(--mt-muted) !important; font-size:0.95rem !important; line-height:1.35 !important; }
 
-.card-body { overflow: auto !important; margin-top:8px !important; }
+.card-body { overflow: auto !important; margin-top:8px !important; flex: 1 1 auto !important; min-height: 0 !important; }
+
+.doc-footer {
+    margin-top: auto !important;
+    padding: 1rem 0.9rem 0.9rem 0.9rem !important;
+    border-top: 1px solid rgba(15,23,42,0.06) !important;
+    background: rgba(248,250,252,0.92) !important;
+    border-radius: 0 0 14px 14px !important;
+}
+
+.doc-footer-meta {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 0.75rem !important;
+    flex-wrap: wrap !important;
+}
+
+.doc-category {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.4rem !important;
+    padding: 0.35rem 0.8rem !important;
+    background: rgba(99,102,241,0.12) !important;
+    color: var(--primary-color) !important;
+    border-radius: 999px !important;
+    font-size: 0.82rem !important;
+    font-weight: 700 !important;
+}
+
+.doc-date {
+    color: var(--text-secondary) !important;
+    font-size: 0.85rem !important;
+}
 
 .doc-tags { display:flex !important; gap:8px !important; margin-top:10px !important; }
 .tag { display:inline-block !important; max-width: 110px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; padding:6px 8px !important; background: rgba(124,58,237,0.06) !important; border-radius:8px !important; color:var(--mt-ink) !important; font-weight:600 !important; }
@@ -2635,13 +5522,11 @@ html, body {
 .category-item:focus, .category-item:focus-within { outline: 3px solid rgba(6,182,212,0.18) !important; }
 
 /* Responsive */
-@media (max-width: 1100px) {
-    .docs-container { grid-template-columns: repeat(2, 1fr) !important; }
+@media (max-width: 900px) {
     .container .sidebar { width: 280px !important; }
 }
 
 @media (max-width: 720px) {
-    .docs-container { grid-template-columns: 1fr !important; }
     .container { padding: 12px !important; }
     .container .sidebar { width: 100% !important; position: relative !important; }
 }
@@ -2841,7 +5726,7 @@ html, body {
 
     .rich-editor {
         min-height: 250px;
-        max-height: 400px;
+        max-height: none;
         padding: 1.5rem 1rem 1rem 1rem;
     }
 
@@ -2936,7 +5821,7 @@ html, body {
 
     .rich-editor {
         min-height: 200px;
-        max-height: 350px;
+        max-height: none;
         padding: 1rem 0.75rem 0.75rem 0.75rem;
     }
 
@@ -2962,7 +5847,7 @@ html, body {
     }
 
     .chat-messages {
-        padding: 1rem;
+        padding: 1.25rem;
     }
 
     .chat-input-area {
@@ -3078,9 +5963,14 @@ html, body {
     flex-shrink: 0;
 }
 
+/* esconder divisor dentro do editor lateral (tabs/icones) para aparência limpa */
+.chat-sidebar-editor .editor-divider {
+    display: none !important;
+}
+
 .rich-editor {
     min-height: 300px;
-    padding: 1rem 1rem 0 1rem;
+    padding: 0.5rem 0.8rem 0 0.8rem;
     border: 1px solid var(--border-color);
     border-radius: 0.5rem 0.5rem 0 0;
     background-color: var(--surface);
@@ -3089,7 +5979,7 @@ html, body {
     outline: none;
     overflow-y: auto;
     overflow-x: hidden;
-    max-height: 500px;
+    max-height: none;
 }
 
 .rich-editor:focus {
@@ -3106,14 +5996,14 @@ html, body {
 .rich-editor h2 {
     font-size: 1.5rem;
     font-weight: 700;
-    margin: 0.5rem 0 0.3rem 0;
+    margin: 0.3rem 0 0.15rem 0;
     color: var(--text-primary);
 }
 
 .rich-editor h3 {
     font-size: 1.2rem;
     font-weight: 600;
-    margin: 0.4rem 0 0.2rem 0;
+    margin: 0.25rem 0 0.1rem 0;
     color: var(--text-primary);
 }
 
@@ -3131,13 +6021,15 @@ html, body {
     text-decoration: underline;
 }
 
-.rich-editor ul {
-    margin: 0.75rem 0 0.75rem 2rem;
-    padding: 0;
+.rich-editor ul,
+.rich-editor ol {
+    margin: 0.4rem 0 0.4rem 0;
+    padding-left: 0;
+    list-style-position: inside;
 }
 
 .rich-editor li {
-    margin: 0.35rem 0;
+    margin: 0.15rem 0;
 }
 
 .rich-editor a {
@@ -3155,8 +6047,68 @@ html, body {
     display: block;
 }
 
+.doc-image-placeholder-wrapper {
+    display: block;
+    width: 100%;
+    margin: 0.4rem 0 0.1rem;
+}
+
+.doc-image-placeholder-remove-btn {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 4px;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    background: rgba(220, 38, 38, 0.12);
+    color: #dc2626;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.doc-image-placeholder-wrapper:hover .doc-image-placeholder-remove-btn {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+
+.doc-image-placeholder-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px dashed #3b82f6;
+    border-radius: 6px;
+    color: #1d4ed8;
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.24rem 0.6rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.doc-image-placeholder-btn:hover {
+    background: rgba(59, 130, 246, 0.18);
+    border-color: #1d4ed8;
+}
+
+.ai-image-placeholder,
+.ai-image-placeholder * {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+
+.ai-image-placeholder .doc-image-placeholder-btn {
+    opacity: 1;
+}
+
 .rich-editor p {
-    margin: 0.5rem 0;
+    margin: 0.25rem 0;
 }
 
 .rich-editor br {
@@ -3171,7 +6123,7 @@ html, body {
 @media (min-width: 769px) {
     .container {
         display: flex;
-        flex-direction: row;
+        transition: transform 30ms cubic-bezier(.2, .9, .2, 1), box-shadow 30ms cubic-bezier(.2, .9, .2, 1), background 24ms ease;
         max-width: 1600px;
         margin: 0 auto;
         gap: 2rem;
@@ -3436,7 +6388,7 @@ html, body {
     display: none;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(1px);
+    backdrop-filter: none;
 }
 
 .reorder-overlay .overlay-content {
@@ -3500,7 +6452,7 @@ html, body {
     white-space: normal;
     border: 2px solid var(--primary-color);
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(var(--primary-color-rgb, 0.1), 0.3);
-    backdrop-filter: blur(8px);
+    backdrop-filter: none;
     pointer-events: none;
 }
 
@@ -3810,16 +6762,7 @@ html, body {
     font-weight: 700;
 }
 
-@media (min-width: 1024px) {
-    .docs-container { grid-template-columns: repeat(3, 1fr) !important; }
-    .doc-card { min-height: 560px !important; min-width: 0 !important; width: 100% !important; }
-    .doc-title {
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        display: block !important;
-        max-height: 3.2rem; /* limitar visual para evitar desalinhamento vertical */
-    }
-}
+/* Removido - conflitava com novos breakpoints. Vê regra ao final do arquivo */
 
 /* Evitar overflow horizontal e garantir que novas documentações causem rolagem vertical */
 html, body {
@@ -3830,12 +6773,7 @@ html, body {
     overflow-x: hidden; /* evita que conteúdo principal gere scroll horizontal */
 }
 
-.docs-container {
-    width: 100%;
-    box-sizing: border-box;
-    overflow-x: hidden; /* esconder barra horizontal dentro do container de cards */
-    grid-auto-rows: minmax(560px, auto); /* garante que cada linha tenha altura mínima dos cards */
-}
+/* REMOVIDA - conflitava com definição base */
 
 .doc-card {
     max-width: 100%;
@@ -3845,6 +6783,7 @@ html, body {
     overflow: hidden !important; /* evitar scroll externo no card */
     display: flex !important;
     flex-direction: column !important;
+    position: relative !important;
 }
 
 .card-top {
@@ -3862,15 +6801,21 @@ html, body {
 }
 
 .card-body {
-    padding: 0 1rem 0.5rem 1rem;
+    padding: 0 1rem 6rem 1rem;
     overflow: auto; /* rolagem interna quando conteúdo exceder */
     flex: 1 1 auto; /* ocupa espaço disponível entre topo e footer */
+    min-height: 0;
 }
 
 .doc-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     padding: 0.75rem 1rem;
-    border-top: 1px solid rgba(255,255,255,0.03);
-    margin-top: 0;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    background: transparent;
+    margin-top: 0 !important;
     flex-shrink: 0;
 }
 
@@ -3904,7 +6849,8 @@ html, body {
 #aiSettingsModal .modal-header-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+    position: relative;
     padding: 14px 18px;
     background: linear-gradient(90deg, var(--primary-color), #6366f1);
     color: #fff;
@@ -3912,15 +6858,20 @@ html, body {
 }
 
 #aiSettingsModal .close-ai-settings {
+    position: absolute;
+    top: 14px;
+    right: 18px;
     background: transparent;
     border: none;
     color: #fff;
     font-size: 1.2rem;
     cursor: pointer;
     padding: 0;
+    line-height: 1;
 }
 
 #aiSettingsModal .modal-body {
+    position: relative;
     padding: 20px;
     background: var(--surface);
     color: var(--text-primary);
@@ -4103,7 +7054,15 @@ html, body {
 
 /* Button de configurações de IA na navbar */
 .btn-ai-settings {
-    display: none !important;
+    display: inline-flex !important; /* mostrar o botão na navbar ao lado do toggle */
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-primary);
 }
 
 /* Botão de configurações do Chat */
@@ -4132,49 +7091,87 @@ html, body {
     border-radius: 14px;
     padding: 0;
     overflow: hidden;
-    height: auto;
+    display: flex;
+    flex-direction: column;
     max-height: 90vh;
     box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35);
     background: var(--surface);
 }
 
+#aiSettingsModal .modal-body {
+    position: relative;
+    padding: 20px;
+    background: var(--surface);
+    color: var(--text-primary);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+#aiSettingsModal .ai-tab-content {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 /* Sistema de abas */
 .ai-settings-tabs {
-    display: flex;
-    gap: 8px;
-    padding: 12px 20px;
-    background: rgba(99, 102, 241, 0.04);
-    border-bottom: 1px solid var(--border-color);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    padding: 14px 20px 10px;
+    background: rgba(15, 23, 42, 0.96);
+    border-bottom: none;
     overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: manipulation;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    cursor: default;
+    backdrop-filter: none;
+    margin: 0;
+    height: 69px;
+    width: 685px;
+    transform: translate(-21px, -19px);
 }
 
 .ai-tab-btn {
-    background: transparent;
-    border: 2px solid transparent;
-    color: var(--text-secondary);
+    background: rgba(148, 163, 184, 0.18);
+    border: none;
+    color: #e2e8f0;
     cursor: pointer;
-    padding: 8px 14px;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    font-weight: 600;
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 0.92rem;
+    font-weight: 700;
     white-space: nowrap;
-    transition: all 0.2s ease;
+    transition: transform 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
 
 .ai-tab-btn:hover {
-    color: var(--primary-color);
-    background: rgba(99, 102, 241, 0.05);
+    color: #f8fafc;
+    background: rgba(148, 163, 184, 0.28);
+    transform: translateY(-1px);
 }
 
 .ai-tab-btn.active {
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
+    color: #ffffff;
+    background: rgba(56, 189, 248, 0.28);
+    box-shadow: 0 14px 28px rgba(56, 189, 248, 0.14);
 }
 
 /* Conteúdo das abas */
 .ai-tab-content {
     display: none;
-    padding: 20px;
+    padding: 12px 20px 20px;
+    border: 1px solid rgba(15, 23, 42, 0.22);
+    border-radius: 18px;
+    background: rgba(15, 23, 42, 0.04);
+    margin-top: 0;
 }
 
 .ai-tab-content.active {
@@ -4191,7 +7188,12 @@ html, body {
     color: var(--text-primary);
     font-size: 0.9rem;
     font-family: 'Courier New', monospace;
-    resize: vertical;
+    resize: none;
+    min-height: 260px;
+}
+
+#aiSystemPrompt.settings-textarea {
+    min-height: 260px;
 }
 
 .settings-textarea:focus {
@@ -4298,7 +7300,7 @@ html, body {
         transform: translateY(0);
     }
 }
-}
+
 
 .ai-prompt-item-actions button {
     background: rgba(99, 102, 241, 0.15);
@@ -4338,12 +7340,235 @@ html, body {
     }
 
     .ai-settings-tabs {
-        padding: 8px 12px;
-        gap: 4px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 10px 12px;
+        gap: 8px;
     }
 
     .ai-tab-btn {
-        padding: 6px 10px;
-        font-size: 0.8rem;
+        padding: 10px 12px;
+        font-size: 0.82rem;
+    }
+}
+
+/* ===== CHAT LAYOUT - Posicionar à esquerda ===== */
+#chat {
+    display: flex !important;
+    width: 100%;
+}
+
+/* Mantém mesma largura/altura existentes, mas fixa o alinhamento à esquerda
+   -- removemos o margin:auto que centralizava o container e forçamos
+   align-self para ficar alinhado ao início do espaço disponível. */
+#chat .chat-wrapper {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 0;
+}
+
+#chat .chat-container {
+    display: flex;
+    flex-direction: column;
+     /* Dimensões exatas 1200x800px */
+    width: 1200px;
+    max-width: 1200px;
+    height: 800px;
+    max-height: 800px;
+    margin: 0; /* remove centralização automática */
+    position: relative; /* necessário para o pseudo-elemento interno */
+    /* Alinhamento à esquerda sem deslocamento negativo (evita overlap com sidebar). */
+     margin-left: 0;
+     margin-right: auto;
+     align-self: flex-start; /* força alinhamento à esquerda dentro do wrapper */
+     /* deslocamento visual seguro: move o elemento sem alterar o fluxo/layout
+         deixando metade da borda exposta conforme pedido */
+    will-change: transform;
+     z-index: 10; /* garante que o chat fique acima do conteúdo adjacente */
+    border-radius: 1.5rem;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+
+@media (max-width: 900px) {
+    #chat .chat-container::before { display: none; }
+}
+
+@media (max-width: 900px) {
+    /* desativa o deslocamento em telas pequenas para evitar sobreposição */
+    #chat .chat-container { transform: none; --chat-shift: 0; z-index: auto; }
+}
+
+/* Ajustes globais para listas Markdown (recupera o espaçamento padrão) */
+/* Muitos resets foram aplicados globalmente; garantimos espaçamento consistente */
+body ul, body ol {
+    margin: 0 0 0.9rem 0; /* topo 0, direita 0, base 0.9rem, esquerda 0 */
+    padding-left: 0;
+    list-style-position: inside; /* marcador/número fica junto ao texto */
+    color: var(--text-primary);
+}
+
+body ul li, body ol li {
+    margin: 0.25rem 0; /* espaço entre itens */
+}
+
+@media (max-width: 600px) {
+    body ul, body ol { margin-left: 1rem; padding-left: 1rem; }
+}
+
+/* EFEITO 3D NO HOVER: quando o usuário passar o mouse sobre uma resposta do bot,
+   aplicamos uma leve transformação 3D e sombra para dar profundidade. Limitamos
+   a aplicação a dispositivos que suportam hover. */
+@media (hover: hover) {
+    .chat-message.bot .message-content,
+    .chat-message.bot-resume .message-content {
+        /* estado normal, sem efeitos ao hover */
+        transform: translateY(0) rotateX(0) scale(1);
+        transform-origin: 50% 100%;
+        will-change: transform, box-shadow;
+        transition: transform 250ms cubic-bezier(.2,.9,.2,1), box-shadow 250ms cubic-bezier(.2,.9,.2,1), background 250ms cubic-bezier(.2,.9,.2,1);
+    }
+
+    .chat-message.bot .message-content:hover,
+    .chat-message.bot-resume .message-content:hover {
+        /* sem efeito 3D no hover, apenas cursor pointer para indicar clicabilidade */
+        cursor: pointer;
+    }
+}
+
+/* Estado 'selecionado' — EXATAMENTE igual ao normal, só muda cor e borda, totalmente estático */
+.chat-message.bot .message-content.selected,
+.chat-message.bot-resume .message-content.selected {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.06)) !important;
+    border: 2px solid rgba(99,102,241,0.28) !important;
+    border-radius: 12px !important;
+    padding: 0.5rem 0.65rem !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    transform: translateY(0) rotateX(0) scale(1) !important;
+    transition: none !important;
+}
+
+/* indicar tecla/estado acessível quando selecionado */
+.chat-message.bot .message-content.selected::after,
+.chat-message.bot-resume .message-content.selected::after {
+    box-shadow: 0 10px 22px rgba(99,102,241,0.12);
+}
+
+/* Botões de ação (ícones) que aparecem abaixo da mensagem do bot quando selecionada */
+.bot-action-buttons {
+    display: none;
+    flex-direction: row; /* colocar as bolinhas lado a lado */
+    gap: 6px;
+    margin-top: 8px;
+    width: auto; /* ajusta ao conteúdo da bolha */
+    align-items: center; /* centraliza verticalmente */
+    flex-wrap: nowrap;
+}
+
+/* Aparecer quando a mensagem é clicada (.selected) - botões dentro da bolha */
+.message-content.selected .bot-action-buttons {
+    display: flex;
+}
+
+.bot-action-buttons .btn-save-normal,
+.bot-action-buttons .btn-save-passo {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 150ms ease;
+    padding: 0;
+}
+
+.bot-action-buttons .btn-save-normal {
+    background: #4f46e5;
+    color: white;
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+}
+
+.bot-action-buttons .btn-save-normal:hover {
+    background: #4338ca;
+    transform: scale(1.12);
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
+}
+
+/* Estado ativado: conteúdo enviado para o editor (modo 'salvo') */
+.bot-action-buttons .btn-save-normal.saved {
+    background: #1f2937; /* tom mais escuro */
+    box-shadow: 0 4px 14px rgba(15,23,42,0.45) !important;
+    transform: scale(1.02);
+}
+
+.bot-action-buttons .btn-save-passo {
+    background: #a855f7;
+    color: white;
+    box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+}
+
+.bot-action-buttons .btn-save-passo:hover {
+    background: #9333ea;
+    transform: scale(1.12);
+    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+}
+
+/* ===== DEFINIÇÃO BASE: docs-container padrão (3 colunas) ===== */
+.docs-container {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 1.5rem !important;
+    padding: 1.5rem 1rem 3rem 1rem !important;
+    max-height: 80vh !important;
+    overflow-y: auto !important;
+    align-items: start !important;
+}
+
+/* Definição base já cobre 1235px+; não precisa media query duplicada *//* ===== BREAKPOINT RESPONSIVO: 1024px-1234px para 2 colunas ===== */
+@media (min-width: 1024px) and (max-width: 1234px) {
+    .docs-container {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 1.75rem !important;
+        padding: 1.5rem 1rem 3rem 1rem !important;
+        align-items: start !important;
+    }
+    
+    .doc-card {
+        min-height: 560px !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        box-shadow: var(--shadow) !important;
+        border-radius: 0.5rem !important;
+        padding: 1rem !important;
+        position: relative !important;
+    }
+}
+
+/* ===== BREAKPOINT RESPONSIVO: até 1023px para 1 coluna ===== */
+@media (max-width: 1023px) {
+    .docs-container {
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 1.5rem !important;
+        padding: 1.5rem 1rem 3rem 1rem !important;
+        align-items: start !important;
+    }
+    
+    .doc-card {
+        min-height: auto !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        box-shadow: var(--shadow) !important;
+        border-radius: 0.5rem !important;
+        padding: 1rem !important;
     }
 }

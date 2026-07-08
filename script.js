@@ -1,28 +1,498 @@
 let documentacoes = [];
 let exemplos = [];
 let categorias = [];
+
+function ensureAppState() {
+    if (!Array.isArray(documentacoes)) documentacoes = [];
+    if (!Array.isArray(exemplos)) exemplos = [];
+    if (!Array.isArray(categorias)) categorias = [];
+    if (!aiConfig || typeof aiConfig !== 'object') aiConfig = { apiKey: '', model: '', provider: '' };
+}
+window.ensureAppState = ensureAppState;
 let currentEditingId = null;
 let currentEditingType = null;
 let currentSelectedCategory = 'todos';
+
+function sanitizeAiConfigForStorage(config = {}) {
+    if (!config || typeof config !== 'object') return {};
+    const sanitized = { ...config };
+    delete sanitized.apiKey;
+    return sanitized;
+}
+
+function readPersistedAiConfig() {
+    try {
+        const raw = localStorage.getItem(STORAGE_AI);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return parsed;
+    } catch (e) {
+        return null;
+    }
+}
+
+function persistAiConfig(config = {}) {
+    try {
+        const safeConfig = sanitizeAiConfigForStorage(config || {});
+        safeConfig.apiKey = undefined;
+        localStorage.setItem(STORAGE_AI, JSON.stringify(safeConfig));
+        if (config && typeof config === 'object' && 'apiKey' in config) {
+            const nextKey = String(config.apiKey || '');
+            sessionStorage.setItem('dochub-ai-api-key', nextKey);
+            localStorage.setItem('dochub-ai-api-key', nextKey);
+        }
+    } catch (e) {
+        console.warn('Não foi possível persistir a configuração de IA', e);
+    }
+}
+
+function restoreAiApiKey() {
+    try {
+        const persistedKey = (typeof window !== 'undefined' && typeof window.readPersistedAiApiKey === 'function')
+            ? window.readPersistedAiApiKey(localStorage, sessionStorage)
+            : (sessionStorage.getItem('dochub-ai-api-key') || localStorage.getItem('dochub-ai-api-key') || '');
+
+        if (persistedKey) {
+            aiConfig.apiKey = persistedKey;
+            sessionStorage.setItem('dochub-ai-api-key', persistedKey);
+            localStorage.setItem('dochub-ai-api-key', persistedKey);
+            return persistedKey;
+        }
+
+        const raw = readPersistedAiConfig();
+        if (raw && raw.apiKey) {
+            aiConfig.apiKey = raw.apiKey;
+            sessionStorage.setItem('dochub-ai-api-key', String(raw.apiKey));
+            localStorage.setItem('dochub-ai-api-key', String(raw.apiKey));
+            return raw.apiKey;
+        }
+        return '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function getAiInputAttributes() {
+    return {
+        type: 'text',
+        autocomplete: 'off',
+        autocapitalize: 'off',
+        spellcheck: 'false',
+        enterkeyhint: 'done',
+        inputmode: 'text'
+    };
+}
+
+function setAiKeyInputValue(input, value = '', reveal = false) {
+    if (!input) return;
+    const normalizedValue = String(value || '').trim();
+    input.dataset.rawValue = normalizedValue;
+    input.dataset.reveal = reveal ? 'true' : 'false';
+    input.type = 'text';
+    input.value = normalizedValue;
+}
+
+function getAiKeyInputValue(input) {
+    if (!input) return '';
+    const raw = input.dataset.rawValue || '';
+    if (raw) return raw.trim();
+    return (input.value || '').trim();
+}
+
+function configureAiKeyInput(input) {
+    if (!input) return;
+    const attrs = getAiInputAttributes();
+    input.type = attrs.type;
+    input.setAttribute('autocomplete', attrs.autocomplete);
+    input.setAttribute('autocapitalize', attrs.autocapitalize);
+    input.setAttribute('spellcheck', attrs.spellcheck);
+    input.setAttribute('inputmode', attrs.inputmode);
+    input.setAttribute('enterkeyhint', attrs.enterkeyhint);
+    input.setAttribute('data-lpignore', 'true');
+    input.setAttribute('data-1p-ignore', 'true');
+    input.setAttribute('data-bwignore', 'true');
+    input.dataset.reveal = 'true';
+    input.addEventListener('input', () => {
+        const nextValue = input.value || '';
+        input.dataset.rawValue = nextValue;
+        input.value = nextValue;
+    });
+    input.addEventListener('focus', () => {
+        input.value = input.dataset.rawValue || '';
+    });
+    input.addEventListener('blur', () => {
+        input.value = input.dataset.rawValue || '';
+    });
+}
+
+function initializeAiKeyInputs() {
+    ['aiApiKey', 'testApiKey'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        configureAiKeyInput(el);
+        setAiKeyInputValue(el, el.dataset.rawValue || '', true);
+    });
+}
+window.initializeAiKeyInputs = initializeAiKeyInputs;
+
+function setActiveAiTab(tabName = 'api') {
+    document.querySelectorAll('.ai-tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.ai-tab-content').forEach(content => {
+        content.classList.toggle('active', content.dataset.tab === tabName);
+    });
+}
+window.setActiveAiTab = setActiveAiTab;
+
 let currentViewVersion = 'normal';
 let currentEditVersion = 'normal';
 let currentDocFullscreen = false;
-let aiConfig = { apiKey: '', model: '' };
+let aiConfig = { apiKey: '', model: '', provider: '' };
+let aiSettingsSaved = false; // flag temporária para controlar fechamento do modal de IA
+let activeChatCommandNames = []; // comandos @ ativos no chat IA
+let chatMentionSelectionBlockedSend = false;
+let aiAutoValidationTimer = null;
+const DEFAULT_OPENAI_MODEL = 'gpt-3.5-turbo';
+const DEFAULT_GENAI_MODEL = 'gemini-2.5-flash';
+
+function inferProviderFromModel(model = '') {
+    const name = (model || '').toLowerCase();
+    if (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) return 'genai';
+    if (name.includes('claude') || name.includes('anthropic')) return 'anthropic';
+    return 'openai';
+}
+
+function detectProviderFromApiKey(apiKey = '', model = '', provider = '') {
+    const normalizedProvider = String(provider || '').trim().toLowerCase();
+    if (['genai', 'gemini', 'google', 'googleai', 'google-generative-ai'].includes(normalizedProvider)) return 'genai';
+    if (['openai', 'gpt', 'chatgpt'].includes(normalizedProvider)) return 'openai';
+    if (['anthropic', 'claude'].includes(normalizedProvider)) return 'anthropic';
+
+    const key = String(apiKey || '').trim();
+    if (/^AIza/.test(key)) return 'genai';
+    if (/^(sk-|sk-proj-|sk-ant-|gsk_)/.test(key)) return 'openai';
+
+    const modelName = String(model || '').trim().toLowerCase();
+    if (modelName.includes('gemini') || modelName.includes('gemma')) return 'genai';
+    if (modelName.includes('claude') || modelName.includes('anthropic')) return 'anthropic';
+
+    return inferProviderFromModel(model);
+}
+
+function normalizeAiModel(model = '', provider = '') {
+    const effectiveProvider = provider || inferProviderFromModel(model);
+    const currentModel = (model || '').trim();
+
+    if (effectiveProvider === 'genai') {
+        const lower = currentModel.toLowerCase();
+        if (!currentModel || lower.includes('gemma') || lower.startsWith('gemini-1.5') || lower.startsWith('gemini-2.0') || lower === 'gemini-1.5' || lower === 'gemini-2.0-flash-exp') {
+            return DEFAULT_GENAI_MODEL;
+        }
+        return currentModel;
+    }
+
+    if (effectiveProvider === 'anthropic') {
+        return currentModel || 'claude-3-5-sonnet-latest';
+    }
+
+    return currentModel || DEFAULT_OPENAI_MODEL;
+}
+let isChatThinking = false; // indica se a IA está processando uma requisição
+let nextBotMessageIsResume = false; // marca se a próxima mensagem de bot é um resumo
 const STORAGE_UI = 'dochub-ui-config';
 
 /*
-  ╔═══════════════════════════════════════════════════════════════════════╗
-  ║ RASTREAMENTO DE MUDANÇAS - AVISO DE SAÍDA SEGURA                      ║
-  ╠═══════════════════════════════════════════════════════════════════════╣
-  ║ hasUnsavedChanges: boolean                                            ║
-  ║   - TRUE: User está editando/criando e há mudanças não salvas        ║
-  ║   - FALSE: Nada em edição ou já foi salvo                            ║
-  ║                                                                       ║
-  ║ Quando TRUE, evento 'beforeunload' avisa ao fechar a página          ║
-  ║ ALTERAR EM: adicionarDocumentacao(), salvarEdicao(), limpar ao sair  ║
-  ╚═══════════════════════════════════════════════════════════════════════╝
+  Rastreamento de mudanças - aviso de saída segura.
+  hasUnsavedChanges = true quando houver mudanças não salvas.
 */
 let hasUnsavedChanges = false;
+// Quando true, impede que o evento beforeunload mostre confirmação.
+let suppressUnsavedWarning = false;
+let pendingImagePlaceholderForNormalDoc = null;
+let chatSavedSinceOpen = false;
+const imagePlaceholderDisabledNodes = new WeakSet();
+
+function createNormalDocImagePlaceholder(editorId, manual = false) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'doc-image-placeholder-wrapper';
+    wrapper.dataset.editor = editorId;
+    wrapper.setAttribute('contenteditable', 'false');
+    if (manual) wrapper.dataset.manual = 'true';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'doc-image-placeholder-btn';
+    btn.textContent = '🖼️';
+    btn.title = 'Inserir imagem';
+    btn.dataset.editor = editorId;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'doc-image-placeholder-remove-btn';
+    removeBtn.title = 'Excluir placeholder';
+    removeBtn.textContent = '✕';
+    wrapper.appendChild(btn);
+    wrapper.appendChild(removeBtn);
+    return wrapper;
+}
+
+function cleanNormalDocImagePlaceholders(editor) {
+    if (!editor) return;
+    const placeholders = Array.from(editor.querySelectorAll('.doc-image-placeholder-wrapper'));
+    placeholders.forEach(ph => {
+        if (ph.dataset.manual === 'true') return;
+        ph.remove();
+    });
+}
+
+function getNormalDocNumberedLineNumber(text) {
+    if (!text) return null;
+    const trimmed = text.trim();
+    const match = trimmed.match(/^(\d+)\.\s+[A-ZÀ-Ú].*/);
+    if (!match) return null;
+    const n = parseInt(match[1], 10);
+    return Number.isNaN(n) ? null : n;
+}
+
+function isNormalDocNumberedLine(text) {
+    return getNormalDocNumberedLineNumber(text) !== null;
+}
+
+function stripRichEditorListFormatting(editor) {
+    if (!editor) return;
+    const lists = editor.querySelectorAll('ul, ol');
+    lists.forEach((list) => {
+        const paragraph = document.createElement('p');
+        const fragments = Array.from(list.children).map((item) => item.innerHTML || item.textContent || '');
+        paragraph.innerHTML = fragments.join('<br>');
+        list.replaceWith(paragraph);
+    });
+}
+
+function shouldPreventAutoListOnEnter(editor) {
+    if (!editor) return false;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    const block = element?.closest('p, li, div');
+    if (!block) return false;
+
+    const text = (block.textContent || '').replace(/\u00A0/g, ' ').trim();
+    return /^\d+[.)]\s*$/.test(text) || /^[-*+]\s*$/.test(text);
+}
+
+function handleRichEditorEnter(editor, event) {
+    if (!editor || !event || event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+    }
+
+    if (shouldPreventAutoListOnEnter(editor)) {
+        event.preventDefault();
+        document.execCommand('insertParagraph', false, null);
+        requestAnimationFrame(() => {
+            stripRichEditorListFormatting(editor);
+            preserveImagePlaceholderBlock(editor);
+            ensureImagePlaceholdersInNormalEditor(editor);
+        });
+    }
+}
+
+function ensureImagePlaceholdersInNormalEditor(editor) {
+    if (!editor || !editor.id) return;
+    if (!(editor.id === 'docContent' || editor.id === 'editDocContent')) return;
+
+    cleanNormalDocImagePlaceholders(editor);
+
+    const selection = window.getSelection();
+    let savedRange = null;
+    if (selection && selection.rangeCount > 0) {
+        try {
+            savedRange = selection.getRangeAt(0).cloneRange();
+        } catch (e) {
+            savedRange = null;
+        }
+    }
+
+    const nodes = Array.from(editor.children);
+    nodes.forEach((node) => {
+        if (!node || node.classList.contains('doc-image-placeholder-wrapper')) return;
+        if (node.querySelector && node.querySelector('img')) return;
+        imagePlaceholderDisabledNodes.delete(node);
+    });
+
+    try {
+        if (savedRange) {
+            selection.removeAllRanges();
+            selection.addRange(savedRange);
+        }
+    } catch (e) {}
+}
+
+function moveCaretToImagePlaceholderParagraph(editor, placeholder) {
+    if (!editor || !placeholder) return;
+    const next = placeholder.nextElementSibling;
+    if (!next || !next.tagName || next.tagName.toLowerCase() !== 'p') return;
+
+    const caret = () => {
+        const range = document.createRange();
+        range.setStart(next, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        if (!selection) return;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        editor.focus();
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(caret);
+    } else {
+        setTimeout(caret, 0);
+    }
+}
+
+function insertManualImagePlaceholderAtCursor(editor) {
+    if (!editor || !editor.id) return null;
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return null;
+    let node = selection.getRangeAt(0).commonAncestorContainer;
+    if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+    while (node && node.parentNode !== editor) {
+        node = node.parentNode;
+    }
+    if (!node || node.classList.contains('doc-image-placeholder-wrapper')) return null;
+
+    const previous = node.previousElementSibling;
+    if (previous && previous.classList.contains('doc-image-placeholder-wrapper')) return previous;
+    if (node.querySelector && node.querySelector('img')) return null;
+
+    const placeholder = createNormalDocImagePlaceholder(editor.id, true);
+    const paragraphBelow = document.createElement('p');
+    paragraphBelow.dataset.imageParagraph = 'true';
+    paragraphBelow.innerHTML = '<br>';
+
+    editor.insertBefore(placeholder, node);
+    editor.insertBefore(paragraphBelow, node);
+    imagePlaceholderDisabledNodes.add(node);
+    ensureImageBlockStructure(editor);
+    moveCaretToImagePlaceholderParagraph(editor, placeholder);
+    return placeholder;
+}
+
+function ensureImageBlockStructure(editor) {
+    if (!editor) return;
+
+    const placeholders = Array.from(editor.querySelectorAll('.doc-image-placeholder-wrapper'));
+
+    placeholders.forEach((placeholder) => {
+        if (!placeholder.parentNode) return;
+
+        const next = placeholder.nextElementSibling;
+
+        if (!next) {
+            const forced = document.createElement('p');
+            forced.innerHTML = '<br>';
+            placeholder.parentNode.appendChild(forced);
+            return;
+        }
+
+        if (next.tagName && next.tagName.toLowerCase() === 'p') {
+            next.dataset.imageParagraph = 'true';
+            if (!next.textContent || next.textContent.trim() === '') {
+                next.innerHTML = '<br>';
+            }
+            return;
+        }
+
+        const forced = document.createElement('p');
+        forced.dataset.imageParagraph = 'true';
+        forced.innerHTML = '<br>';
+        placeholder.parentNode.insertBefore(forced, next);
+    });
+}
+
+function preserveImagePlaceholderBlock(editor) {
+    if (!editor) return;
+    ensureImageBlockStructure(editor);
+
+    const placeholders = Array.from(editor.querySelectorAll('.doc-image-placeholder-wrapper'));
+    placeholders.forEach((placeholder) => {
+        if (!placeholder.nextElementSibling || placeholder.nextElementSibling.tagName.toLowerCase() !== 'p') {
+            const forced = document.createElement('p');
+            forced.dataset.imageParagraph = 'true';
+            forced.innerHTML = '<br>';
+            placeholder.parentNode.insertBefore(forced, placeholder.nextSibling);
+        }
+    });
+}
+
+function replaceImageShortcutTokens(editor) {
+    if (!editor || !editor.id) return;
+    if (!['docContent', 'editDocContent'].includes(editor.id)) return;
+
+    const originalHtml = editor.innerHTML || '';
+    if (!/\$image(?:\$|%)/i.test(originalHtml)) return;
+
+    const placeholderMarkup = [
+        '<div class="doc-image-placeholder-wrapper" data-editor="' + editor.id + '" contenteditable="false" data-manual="true">',
+        '  <button type="button" class="doc-image-placeholder-btn" data-editor="' + editor.id + '" title="Inserir imagem">🖼️</button>',
+        '  <button type="button" class="doc-image-placeholder-remove-btn" title="Excluir placeholder">✕</button>',
+        '</div>',
+        '<p data-image-paragraph="true"><br></p>'
+    ].join('');
+
+    const nextHtml = originalHtml.replace(/\$image(?:\$|%)/gi, placeholderMarkup);
+    if (nextHtml === originalHtml) return;
+
+    editor.innerHTML = nextHtml;
+    ensureImagePlaceholdersInNormalEditor(editor);
+    preserveImagePlaceholderBlock(editor);
+
+    const insertedPlaceholders = Array.from(editor.querySelectorAll('.doc-image-placeholder-wrapper[data-manual="true"]'));
+    const lastPlaceholder = insertedPlaceholders.length > 0 ? insertedPlaceholders[insertedPlaceholders.length - 1] : null;
+    if (lastPlaceholder) {
+        moveCaretToImagePlaceholderParagraph(editor, lastPlaceholder);
+    }
+
+    hasUnsavedChanges = true;
+}
+
+
+function inserirImagemNoEditorAtPlaceholder(files, placeholder, editorId) {
+    if (!files || files.length === 0) return;
+    if (!placeholder || !placeholder.parentNode) return;
+    const editor = document.getElementById(editorId);
+    if (!editor) return;
+
+    Array.from(files).forEach(file => {
+        if (!file.type.startsWith('image/')) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.display = 'block';
+            img.style.margin = '1rem 0';
+            img.style.borderRadius = '0.5rem';
+
+            const p = document.createElement('p');
+            p.appendChild(img);
+            placeholder.parentNode.insertBefore(p, placeholder);
+            placeholder.parentNode.removeChild(placeholder);
+            // Optionally remove following blank paragraphs if adjacent
+
+            // keep the editor in focus
+            editor.focus();
+
+            // This function is used for placeholder insertion. Do not persist this change automatically (done by save flow)
+        };
+        reader.readAsDataURL(file);
+    });
+}
 
 // apply UI config (colors) to CSS variables
 function applyUiConfig(conf) {
@@ -61,17 +531,84 @@ const STORAGE_DOCS = 'dochub-docs';
 const STORAGE_EXEMPLOS = 'dochub-exemplos';
 const STORAGE_CATEGORIAS = 'dochub-categorias';
 const STORAGE_AI = 'dochub-ai-config';
+const STORAGE_STATE_BACKUP = 'dochub-state-backup';
 
-document.addEventListener('DOMContentLoaded', () => {
-    carregarDados();
+function getApiBaseUrl() {
+    try {
+        const configured = (window.DOC_API_BASE_URL || '').trim();
+        if (configured) return configured.replace(/\/$/, '');
+    } catch (e) {}
+    return '';
+}
+
+function apiUrl(path = '/') {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const base = getApiBaseUrl();
+    return base ? `${base}${normalizedPath}` : normalizedPath;
+}
+
+function getStateBackup() {
+    try {
+        const raw = localStorage.getItem(STORAGE_STATE_BACKUP);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveStateBackup() {
+    try {
+        const snapshot = {
+            documents: Array.isArray(documentacoes) ? documentacoes : [],
+            examples: Array.isArray(exemplos) ? exemplos : [],
+            categories: Array.isArray(categorias) ? categorias : [],
+            chat: getChatStorageData(),
+            ai: sanitizeAiConfigForStorage(aiConfig || { apiKey: '', model: '', provider: '' })
+        };
+        localStorage.setItem(STORAGE_STATE_BACKUP, JSON.stringify(snapshot));
+    } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await verificarSessao();
+    } catch (e) {}
+    ensureAppState();
     inicializarEventos();
     inicializarChat();
+    // inicializa o editor lateral do chat quando presente
+    if (document.getElementById('chatSidebarEditor')) inicializarChatSidebar();
+    // Garantir estado do cabeçalho do Chat IA no carregamento:
+    try {
+        const wasOpen = localStorage.getItem('dochub-chat-editor-open') === 'true';
+        const savedTab = localStorage.getItem('dochub-chat-editor-tab') || null;
+        if (!wasOpen) {
+            // Se o editor está fechado no início, remover quaisquer classes de modo
+            document.body.classList.remove('chat-mode-normal');
+            document.body.classList.remove('chat-mode-passo');
+        } else {
+            // Se estava aberto, aplicar o modo salvo ao body para manter cabeçalho coerente
+            if (savedTab === 'passo') {
+                document.body.classList.add('chat-mode-passo');
+                document.body.classList.remove('chat-mode-normal');
+            } else {
+                document.body.classList.add('chat-mode-normal');
+                document.body.classList.remove('chat-mode-passo');
+            }
+        }
+    } catch (e) {}
     criarCategoriasDefault();
     renderizarCategorias();
     atualizarSelectsCategorias();
     atualizarStats();
     filtrarPorCategoria('todos');
     renderizarExemplos();
+
+    // Se a página foi aberta após o chat, restaura a seção anterior sem alterar dados salvos
+    try {
+        restaurarUltimaSecao();
+    } catch (e) { }
     
     // Icon Popover Initialization
     const toggleBtn = document.getElementById('toggleIconPaletteBtn');
@@ -104,8 +641,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// Garantir restauração final após toda a inicialização (fallback):
+window.addEventListener('load', () => {
+    try {
+        const validSections = ['documentos', 'exemplos', 'adicionar'];
+        // prefer hash primeiro
+        const hash = (window.location.hash || '').replace('#', '').trim();
+        let target = null;
+        if (hash && validSections.includes(hash)) target = hash;
+        if (!target) {
+            const stored = localStorage.getItem('dochub-chat-return-section');
+            if (stored && validSections.includes(stored)) target = stored;
+        }
+
+        if (target === 'adicionar') {
+            // small delay to let other init logic finish and then force the section
+            setTimeout(() => {
+                try {
+                    mudarSecao('adicionar');
+                    restaurarRascunhoAdicionar();
+                } catch (e) { }
+            }, 200);
+        }
+    } catch (e) { }
+});
+
 // Aviso de segurança ao sair da página com mudanças não salvas
 window.addEventListener('beforeunload', (e) => {
+    // Se a navegação foi intencional pelo app (ex: abrir Chat IA), o fluxo pode
+    // suprimir o aviso. Caso contrário, manter o comportamento padrão.
+    if (suppressUnsavedWarning) return;
     if (hasUnsavedChanges) {
         e.preventDefault();
         e.returnValue = '';
@@ -113,10 +678,160 @@ window.addEventListener('beforeunload', (e) => {
     }
 });
 
+// Garantir que o rascunho do sidebar seja salvo ao recarregar/fechar a página
+window.addEventListener('beforeunload', () => {
+    try { saveChatSidebarDraft(); } catch(e){}
+});
+
+// Autosize do textarea do chat: cresce até um limite (responsivo)
+function initChatInputAutosize() {
+    const input = document.getElementById('chatInput');
+    if (!input) return;
+    input.style.overflow = 'hidden';
+    // calcular altura inicial (visível) e permitir crescimento até +40%
+    const computed = window.getComputedStyle(input);
+    const initialH = input.clientHeight || parseFloat(computed.height) || 48;
+    // limite responsivo: 40% a mais que a altura inicial, mas com teto razoável
+    const calcMax = (w) => {
+        const preferred = Math.round(initialH * 1.4);
+        const screenCap = w < 420 ? Math.max(preferred, 90) : Math.max(preferred, 120);
+        // garantir não ultrapassar uma fração da viewport (ex: 30% da altura)
+        const viewportCap = Math.round(window.innerHeight * 0.3);
+        return Math.min(screenCap, Math.max(preferred, viewportCap));
+    };
+
+    const resize = () => {
+        input.style.height = 'auto';
+        const max = calcMax(window.innerWidth);
+        const newH = Math.min(input.scrollHeight, max);
+        input.style.height = (newH) + 'px';
+    };
+
+    // inicial + handlers
+    resize();
+    input.addEventListener('input', resize);
+    window.addEventListener('resize', resize);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        ensureAppState();
+        initializeAiAutoSetup();
+        initChatInputAutosize();
+    } catch (e) { console.warn('autosize init failed', e); }
+});
+
+async function realizarLogin() {
+    mostrarApp();
+    await carregarDados();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const loginButton = document.getElementById('authLoginBtn');
+    if (loginButton) {
+        loginButton.addEventListener('click', realizarLogin);
+    }
+
+    const passwordInput = document.getElementById('authPassword');
+    if (passwordInput) {
+        passwordInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                realizarLogin();
+            }
+        });
+    }
+
+    const usernameInput = document.getElementById('authUsername');
+    if (usernameInput) {
+        usernameInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                document.getElementById('authPassword')?.focus();
+            }
+        });
+    }
+
+    const logoutButton = document.getElementById('logoutBtn');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', async () => {
+            mostrarApp();
+            await carregarDados();
+        });
+    }
+});
+
+// Legacy bindings removed; login is now wired in the DOMContentLoaded handler above.
+
+// Sanitiza conteúdo colado em editores contenteditable: remove estilos, classes e backgrounds
+function sanitizePasteHandler(e) {
+    try {
+        e.preventDefault();
+        const clipboard = (e.clipboardData || window.clipboardData);
+        const html = clipboard.getData('text/html');
+        const text = clipboard.getData('text/plain');
+
+        // Allow basic formatting tags but strip styles and classes
+        const allowedTags = ['b','strong','i','em','u','ul','ol','li','p','br','h1','h2','h3','h4','h5','h6','code','pre','a'];
+        const allowedAttrs = ['href','title','alt','src','target'];
+
+        if (html && window.DOMPurify) {
+            const clean = DOMPurify.sanitize(html, {ALLOWED_TAGS: allowedTags, ALLOWED_ATTR: allowedAttrs});
+            // inserir HTML limpo na posição do cursor
+            if (document.queryCommandSupported && document.queryCommandSupported('insertHTML')) {
+                document.execCommand('insertHTML', false, clean);
+            } else {
+                // fallback: usar Range/Selection
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                sel.deleteFromDocument();
+                const range = sel.getRangeAt(0);
+                const frag = document.createRange().createContextualFragment(clean);
+                range.insertNode(frag);
+                range.collapse(false);
+            }
+        } else if (text) {
+            // inserir texto puro (preserva quebras de linha)
+            const escaped = text.replace(/\n/g, '<br>');
+            if (document.queryCommandSupported && document.queryCommandSupported('insertHTML')) {
+                document.execCommand('insertHTML', false, escaped);
+            } else {
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                sel.deleteFromDocument();
+                const range = sel.getRangeAt(0);
+                const frag = document.createRange().createContextualFragment(escaped);
+                range.insertNode(frag);
+                range.collapse(false);
+            }
+        }
+    } catch (err) {
+        console.warn('sanitizePasteHandler error', err);
+    }
+}
+
+// Attach paste sanitizer to all contenteditable editors on the page
+function attachPasteSanitizers() {
+    try {
+        const editors = document.querySelectorAll('[contenteditable="true"]');
+        editors.forEach(el => {
+            // remove possíveis handlers duplicados
+            el.removeEventListener('paste', sanitizePasteHandler);
+            el.addEventListener('paste', sanitizePasteHandler);
+        });
+    } catch (e) { }
+}
+
+// Attach on DOM ready and whenever sidebar/editor is opened
+document.addEventListener('DOMContentLoaded', attachPasteSanitizers);
+document.addEventListener('click', () => { setTimeout(attachPasteSanitizers, 60); });
+
 function setModalVisible(modalId, visible) {
     const modal = document.getElementById(modalId);
     if (!modal) return;
     if (visible) {
+        // reset saved flag when opening modal (we haven't saved yet)
+        if (modalId === 'aiSettingsModal') aiSettingsSaved = false;
         modal.classList.add('show');
         document.body.classList.add('modal-open');
         // Rastreia qual modal foi aberto (se não estamos no Chat)
@@ -134,6 +849,1123 @@ function setModalVisible(modalId, visible) {
         if (!anyOpen && previousModalOpen === modalId && nextSection !== 'chat') {
             previousModalOpen = null;
         }
+        // If closing AI settings modal, AUTO-SAVE os prompts atuais (em vez de revert)
+        if (modalId === 'aiSettingsModal') {
+            autoSaveAISettings();
+            // clear the temporary flag for next open
+            aiSettingsSaved = false;
+        }
+    }
+}
+
+// Auto-save prompts quando fecha modal ou muda de página (sem perder alterações)
+function autoSaveAISettings() {
+    try {
+        let stored = {};
+        const raw = localStorage.getItem(STORAGE_AI);
+        if (raw) stored = JSON.parse(raw);
+        if (!stored || typeof stored !== 'object') stored = {};
+
+        // Ler todos os campos do modal (se existirem) e atualizar aiConfig
+        const apiKeyEl = document.getElementById('aiApiKey');
+        const modelEl = document.querySelector('input[name="aiModel"]:checked');
+        const summaryPromptEl = document.getElementById('aiSummarySystemPrompt');
+
+        // Manter a API key disponível na UI e na sessão para não perder ao recarregar.
+        if (apiKeyEl) {
+            const enteredKey = getAiKeyInputValue(apiKeyEl);
+            if (enteredKey) {
+                stored.apiKey = enteredKey;
+                aiConfig.apiKey = enteredKey;
+                sessionStorage.setItem('dochub-ai-api-key', enteredKey);
+            } else {
+                stored.apiKey = aiConfig.apiKey || restoreAiApiKey();
+            }
+            setAiKeyInputValue(apiKeyEl, enteredKey || aiConfig.apiKey || '', true);
+            configureAiKeyInput(apiKeyEl);
+        }
+        if (modelEl) stored.model = normalizeAiModel(modelEl.value, inferProviderFromModel(modelEl.value));
+        if (summaryPromptEl) stored.summarySystemPrompt = (summaryPromptEl.value || '').trim();
+
+        // Infer provider if not set
+        if (!stored.provider && stored.model) {
+            stored.provider = inferProviderFromModel(stored.model);
+        }
+
+        const commandsEl = document.getElementById('aiCommandsList');
+        if (commandsEl) {
+            stored.commands = collectAiCommandsFromUI();
+        }
+
+        // Salvar em background para evitar bloqueio do main-thread.
+        const doSave = () => {
+            try {
+                persistAiConfig({ ...stored, apiKey: aiConfig.apiKey || '' });
+                aiConfig = { ...stored, apiKey: aiConfig.apiKey || '' };
+            } catch (e) {
+                console.error('[ERROR] autoSaveAISettings failed during background save', e);
+            }
+        };
+        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            try { requestIdleCallback(doSave, { timeout: 1000 }); } catch (e) { setTimeout(doSave, 50); }
+        } else {
+            setTimeout(doSave, 50);
+        }
+    } catch (e) {
+        console.error('[ERROR] autoSaveAISettings failed', e);
+    }
+}
+
+function getStoredAiCommandsSnapshot() {
+    if (aiConfig && typeof aiConfig === 'object' && aiConfig.commands && typeof aiConfig.commands === 'object' && Object.keys(aiConfig.commands).length) {
+        return aiConfig.commands;
+    }
+    try {
+        const raw = localStorage.getItem(STORAGE_AI);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.commands && typeof parsed.commands === 'object') {
+            return parsed.commands;
+        }
+    } catch (e) {}
+    return {};
+}
+
+function collectAiCommandsFromUI() {
+    const rows = document.querySelectorAll('.ai-command-row');
+    const commands = {};
+    rows.forEach(row => {
+        const nameEl = row.querySelector('.ai-command-name');
+        const promptEl = row.querySelector('.ai-command-prompt');
+        if (!nameEl || !promptEl) return;
+
+        let name = (nameEl.value || '').trim().replace(/^@/, '');
+        const prompt = (promptEl.value || '').trim();
+        if (!name || !prompt) return;
+
+        name = name.toLowerCase();
+        commands[name] = prompt;
+    });
+    return commands;
+}
+
+function renderAiCommandsUI() {
+    const container = document.getElementById('aiCommandsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const commands = getStoredAiCommandsSnapshot();
+    const entries = Object.entries(commands).sort((a, b) => a[0].localeCompare(b[0]));
+
+    if (entries.length === 0) {
+        const helper = document.createElement('div');
+        helper.style = 'color:var(--text-secondary);padding:12px 0;';
+        helper.textContent = 'Nenhum comando salvo ainda. Clique em + Novo Comando para adicionar um comando @.';
+        container.appendChild(helper);
+        return;
+    }
+
+    entries.forEach(([name, prompt]) => addAiCommandRow(name, prompt));
+}
+
+function addAiCommandRow(name = '', prompt = '') {
+    const container = document.getElementById('aiCommandsList');
+    if (!container) return;
+
+    const row = document.createElement('div');
+    row.className = 'ai-command-row';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'ai-command-top';
+
+    const nameWrapper = document.createElement('div');
+    nameWrapper.className = 'ai-command-name-wrapper';
+    const nameField = document.createElement('div');
+    nameField.className = 'ai-command-field';
+    const prefix = document.createElement('span');
+    prefix.className = 'ai-command-prefix';
+    prefix.textContent = '@';
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'ai-command-name ai-command-input';
+    nameInput.value = name.replace(/^@/, '');
+    nameInput.placeholder = 'duvida';
+    nameField.appendChild(prefix);
+    nameField.appendChild(nameInput);
+    nameWrapper.appendChild(nameField);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'ai-command-delete-btn';
+    deleteButton.textContent = '✕';
+    deleteButton.title = 'Excluir comando';
+    deleteButton.setAttribute('aria-label', 'Excluir comando');
+    deleteButton.addEventListener('click', () => {
+        row.remove();
+        autoSaveAISettings();
+    });
+
+    topRow.appendChild(nameWrapper);
+    topRow.appendChild(deleteButton);
+
+    const promptWrapper = document.createElement('div');
+    promptWrapper.className = 'ai-command-prompt-wrapper';
+    const promptTextarea = document.createElement('textarea');
+    promptTextarea.className = 'ai-command-prompt ai-command-textarea';
+    promptTextarea.rows = 5;
+    promptTextarea.value = prompt;
+    promptTextarea.placeholder = 'Escreva o prompt completo que a IA deve usar quando este comando for acionado.';
+    promptTextarea.addEventListener('input', debounce(() => autoSaveAISettings(), 500));
+    nameInput.addEventListener('input', debounce(() => autoSaveAISettings(), 500));
+    promptWrapper.appendChild(promptTextarea);
+
+    row.appendChild(topRow);
+    row.appendChild(promptWrapper);
+    container.appendChild(row);
+}
+
+function saveAiCommandsConfig() {
+    if (!aiConfig || typeof aiConfig !== 'object') aiConfig = {};
+    aiConfig.commands = collectAiCommandsFromUI();
+    aiConfig.apiKey = '';
+    const safeConfig = sanitizeAiConfigForStorage(aiConfig);
+    safeConfig.apiKey = undefined;
+    localStorage.setItem(STORAGE_AI, JSON.stringify(safeConfig));
+    showToast('✅ Comandos salvos!', 'success');
+}
+
+function getAiCommandPrompt(commandName) {
+    if (!commandName) return null;
+    const commands = getStoredAiCommandsSnapshot();
+    return commands[commandName.toLowerCase()] || null;
+}
+
+function parseAiCommandFromText(text) {
+    if (!text || typeof text !== 'string') return { commandName: null, cleanedText: text };
+    const trimmed = text.trim();
+    const match = trimmed.match(/^@([\p{L}\p{N}_-]+)\s*(.*)$/u);
+    if (!match) return { commandName: null, cleanedText: text };
+    return { commandName: match[1].toLowerCase(), cleanedText: (match[2] || '').trim() };
+}
+
+function extractAiCommandNamesFromText(text) {
+    if (!text || typeof text !== 'string') return [];
+    const regex = /@([\p{L}\p{N}_-]+)/gu;
+    const names = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        names.push(match[1].toLowerCase());
+    }
+    return names;
+}
+
+function removeAiCommandTokens(text) {
+    if (!text || typeof text !== 'string') return text;
+    return text.replace(/@([\w-]+)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function removeAiCommandTokensFromList(text, commandNames) {
+    if (!text || typeof text !== 'string' || !Array.isArray(commandNames) || !commandNames.length) {
+        return text;
+    }
+    const escaped = commandNames
+        .filter(Boolean)
+        .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
+    if (!escaped) return text;
+    const regex = new RegExp(`@(?:${escaped})\\b`, 'gi');
+    return text.replace(regex, '').replace(/\s+/g, ' ').trim();
+}
+
+function getActiveChatPrompts() {
+    const commands = getStoredAiCommandsSnapshot();
+    return activeChatCommandNames
+        .map(name => ({ name, prompt: commands[name] }))
+        .filter(item => item.prompt);
+}
+
+function addActiveChatCommands(names) {
+    const normalized = names
+        .filter(Boolean)
+        .map(name => name.toLowerCase())
+        .filter(name => !!getAiCommandPrompt(name));
+    // Manter apenas 1 comando @ por vez (substituir o anterior)
+    if (normalized.length > 0) {
+        activeChatCommandNames = [normalized[0]];
+    }
+    updateActivePromptChips();
+}
+
+function removeActiveChatCommand(name) {
+    activeChatCommandNames = activeChatCommandNames.filter(cmd => cmd !== name.toLowerCase());
+    updateActivePromptChips();
+}
+
+function updateActivePromptChips() {
+    const wrapper = document.getElementById('activePromptsWrapper');
+    const list = document.getElementById('activePromptsList');
+    if (!wrapper || !list) return;
+    list.innerHTML = '';
+    if (!activeChatCommandNames.length) {
+        wrapper.style.display = 'none';
+        return;
+    }
+    wrapper.style.display = 'flex';
+    activeChatCommandNames.forEach(name => {
+        const chip = document.createElement('div');
+        chip.className = 'active-prompt-chip';
+        const icon = document.createElement('span');
+        icon.className = 'active-prompt-chip-icon';
+        icon.textContent = '@';
+        const label = document.createElement('span');
+        label.className = 'active-prompt-chip-label';
+        label.textContent = name;
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '✕';
+        removeBtn.addEventListener('click', () => removeActiveChatCommand(name));
+        chip.appendChild(icon);
+        chip.appendChild(label);
+        chip.appendChild(removeBtn);
+        list.appendChild(chip);
+    });
+}
+
+function getChatCommandsOverridePrompt() {
+    const prompts = getActiveChatPrompts();
+    if (!prompts.length) return null;
+    return [
+        'INSTRUÇÃO OBRIGATÓRIA - SIGA ESTES PROMPTS DE COMANDO:'.trim(),
+        ...prompts.map(item => `PROMPT @${item.name}:\n${item.prompt}`),
+        '',
+        'REGRAS DE APLICAÇÃO (OBRIGATÓRIAS):',
+        '1) Use as instruções acima como prioridade máxima.',
+        '2) Responda em português de forma objetiva.',
+        '3) Não ignore os prompts ativos mesmo quando a pergunta do usuário for ampla.'
+    ].join('\n');
+}
+
+/* ========== CHAT SIDEBAR EDITOR ========== */
+function inicializarChatSidebar() {
+    // elementos
+    const tabNormal = document.getElementById('editorTabNormal');
+    const tabPasso = document.getElementById('editorTabPasso');
+    const sidebar = document.getElementById('chatSidebarEditor');
+    const chatContainer = document.querySelector('.chat-container');
+    const chatWrapper = document.querySelector('.chat-wrapper');
+    const contentEl = document.getElementById('chatEditContent');
+    const passoEl = document.getElementById('chatEditPassoContent');
+    // createPassoWrapper removed from UI; keep reference in case other code checks it
+    const createPassoWrapper = document.getElementById('createPassoWrapper');
+    const passoResumoWrapper = document.getElementById('passoResumoWrapper');
+    const passoResumoBtn = document.getElementById('passoResumoBtn');
+    const saveBtn = document.getElementById('chatEditorSaveBtn');
+
+    // Restaurar aba salva para aplicar modo no chatContainer somente se o editor já estiver aberto
+    try {
+        const savedTab = localStorage.getItem('dochub-chat-editor-tab') || 'normal';
+        // Aplicar o último modo selecionado de forma idempotente para sidebar, chatContainer e chatWrapper
+        if (savedTab === 'passo') {
+            if (sidebar) { sidebar.classList.add('passo-mode'); sidebar.classList.remove('normal-mode'); }
+            if (chatContainer) { chatContainer.classList.add('passo-mode'); chatContainer.classList.remove('normal-mode'); }
+            if (chatWrapper) { chatWrapper.classList.add('passo-mode'); chatWrapper.classList.remove('normal-mode'); }
+            if (contentEl && passoEl) { contentEl.style.display = 'none'; passoEl.style.display = ''; }
+            if (tabPasso) { tabPasso.classList.add('active'); if (tabNormal) tabNormal.classList.remove('active'); }
+            try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+            try { if (passoResumoWrapper) passoResumoWrapper.style.display = ''; } catch(e){}
+        } else {
+            if (sidebar) { sidebar.classList.add('normal-mode'); sidebar.classList.remove('passo-mode'); }
+            if (chatContainer) { chatContainer.classList.add('normal-mode'); chatContainer.classList.remove('passo-mode'); }
+            if (chatWrapper) { chatWrapper.classList.add('normal-mode'); chatWrapper.classList.remove('passo-mode'); }
+            if (contentEl && passoEl) { contentEl.style.display = ''; passoEl.style.display = 'none'; }
+            if (tabNormal) { tabNormal.classList.add('active'); if (tabPasso) tabPasso.classList.remove('active'); }
+            try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+            try { if (passoResumoWrapper) passoResumoWrapper.style.display = 'none'; } catch(e){}
+        }
+    } catch (e) {}
+
+    // função que mostra/oculta botão Resumir baseado no conteúdo dos editores
+    function updateCreatePassoButton() {
+        try {
+            const normalText = contentEl ? (contentEl.innerText || '').trim() : '';
+            const passoText = passoEl ? (passoEl.innerText || '').trim() : '';
+
+            // Se houver qualquer coisa no Passo a Passo, o botão fica desabilitado
+            if (passoText && passoResumoBtn) {
+                passoResumoWrapper.style.display = '';
+                passoResumoBtn.disabled = true;
+                passoResumoBtn.classList.add('disabled');
+                return;
+            }
+
+            // Mostrar o botão habilitado se houver qualquer texto no Normal e não houver texto em Passo
+            if (normalText && passoResumoWrapper) {
+                passoResumoWrapper.style.display = '';
+                if (passoResumoBtn) {
+                    passoResumoBtn.disabled = false;
+                    passoResumoBtn.classList.remove('disabled');
+                }
+            } else if (passoResumoWrapper) {
+                passoResumoWrapper.style.display = 'none';
+                if (passoResumoBtn) {
+                    passoResumoBtn.disabled = false;
+                    passoResumoBtn.classList.remove('disabled');
+                }
+            }
+        } catch (e) {}
+    }
+
+    // antigo: função criarPassoAPartirDoNormal removida conforme solicitado
+
+    if (passoResumoBtn) {
+        passoResumoBtn.addEventListener('click', () => {
+            try {
+                if (isChatThinking) return showToast('A IA está processando. Aguarde...', 'warning');
+                const normalText = contentEl ? (contentEl.innerText || '').trim() : '';
+                const passoText = passoEl ? (passoEl.innerText || '').trim() : '';
+
+                if (passoText) return showToast('O resumo está desativado enquanto houver conteúdo em Passo a Passo.', 'warning');
+                if (!normalText) return showToast('Nenhum conteúdo em Normal para resumir.', 'warning');
+
+                const normalHtml = contentEl ? (contentEl.innerHTML || '').trim() : '';
+                const normalPlain = contentEl ? (contentEl.innerText || contentEl.textContent || '').trim() : '';
+
+                const RESUMIR_PROMPT_DEFAULT = `Considere como DOCUMENTAÇÃO todo texto que descreva um procedimento funcional de sistema ou aplicativo. Ignore apenas instruções sobre como você deve responder. Sua tarefa é REESTRUTURAR o conteúdo mantendo integralmente todas as informações operacionais. Remover exclusivamente: Frases explicativas que não alteram a execução. Comentários descritivos. Observações condicionais que não exigem ação direta. Resultados esperados após a ação. Manter obrigatoriamente: Comandos Campos Valores Datas Identificadores Parâmetros Textos entre aspas Informações após dois pontos (:) Sequência original REGRA CRÍTICA DE PRESERVAÇÃO ADICIONAL: Qualquer linha que contenha pelo menos um dos elementos abaixo deve ser mantida obrigatoriamente, mesmo que pareça explicativa: Dois pontos (:) Texto entre aspas Números Datas Valores monetários Códigos Identificadores técnicos Nome de botão Nome de campo Nome de aba Nome de menu Nome de tela Status Tipo Diretório Nunca remover uma linha que contenha qualquer um desses elementos. Não resumir. Não simplificar. Não reorganizar. Não alterar a ordem. Não inferir. Não inventar etapas. Nunca transformar instruções deste prompt em conteúdo da saída. REGRA OBRIGATÓRIA PARA TÍTULOS Sempre que encontrar uma linha que represente uma seção, inclusive linhas iniciadas por: TEXTO ORIGINAL DA SEÇÃO Você deve: Remover completamente a expressão "TEXTO ORIGINAL DA SEÇÃO". Manter apenas o nome real da seção. Converter obrigatoriamente para o formato de título utilizando # correspondente. Todos os títulos devem estar sublinhados utilizando <u> </u>. Exemplo obrigatório de transformação: TEXTO ORIGINAL DA SEÇÃO ACESSO AO PERFIL DIGITAL Deve se tornar exatamente: <u>ACESSO AO PERFIL DIGITAL</u> Nunca manter o prefixo original. Nunca ignorar a transformação. Nunca manter o título em formato simples. REGRAS ADICIONAIS PARA NÍVEIS DE TÍTULO: Todo título principal deve estar no formato ## e totalmente sublinhado. Todo subtítulo deve estar obrigatoriamente no formato ###, totalmente sublinhado e em negrito. Qualquer linha convertida para formato com #, independentemente do nível, deve estar sublinhada. Nunca retornar títulos sem sublinhado. Nunca retornar subtítulos sem negrito e sublinhado. REGRAS DE FORMATAÇÃO Todo texto entre aspas deve: Permanecer com aspas Estar totalmente em negrito Todo valor que apareça após dois pontos (:) deve estar em negrito. Elementos interativos também devem estar em negrito, incluindo: Botões Abas Itens selecionáveis Campos Valores digitados Diretórios Tipos Status ESTRUTURA OBRIGATÓRIA: Uma única ação ou informação operacional por linha. Não inserir linha em branco entre ações consecutivas. Inserir exatamente uma única linha em branco após cada título. Nunca juntar múltiplas ações na mesma linha. Nunca retornar o conteúdo em bloco único. FORMATO FINAL Títulos obrigatoriamente no formato ## ou ### conforme hierarquia identificada. Todos os títulos devem estar sublinhados. Subtítulos devem estar em negrito e sublinhados. Inserir exatamente uma linha em branco após cada título. Conteúdo abaixo do título correspondente, com uma ação por linha. Não inserir linhas em branco adicionais entre as ações. Nada além do conteúdo estruturado. Se não houver ações funcionais, responder exatamente: Nenhuma interação identificada.`;
+
+                // abre modal de prompt específico para resumir
+                const modal = document.createElement('div');
+                modal.id = 'resumirModal';
+                modal.style.position = 'fixed';
+                modal.style.inset = '0';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                modal.style.background = 'rgba(0,0,0,0.32)';
+                modal.style.zIndex = '99999';
+
+                const box = document.createElement('div');
+                box.style.background = 'var(--surface, #ffffff)';
+                box.style.color = 'var(--text-primary, #111827)';
+                box.style.padding = '12px';
+                box.style.borderRadius = '8px';
+                box.style.width = 'min(780px, 92%)';
+                box.style.maxHeight = '80vh';
+                box.style.overflow = 'auto';
+                box.style.boxShadow = '0 10px 30px rgba(2,6,23,0.2)';
+
+                const title = document.createElement('div');
+                title.textContent = 'Prompt de Resumir (edição local)';
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '8px';
+
+                const ta = document.createElement('textarea');
+                ta.id = 'resumirPromptTextarea';
+                ta.value = RESUMIR_PROMPT_DEFAULT;
+                ta.style.width = '100%';
+                ta.style.height = '280px';
+                ta.style.padding = '8px';
+                ta.style.border = '1px solid rgba(0,0,0,0.08)';
+                ta.style.borderRadius = '6px';
+                ta.style.resize = 'vertical';
+
+                const actions = document.createElement('div');
+                actions.style.display = 'flex';
+                actions.style.justifyContent = 'flex-end';
+                actions.style.gap = '8px';
+                actions.style.marginTop = '8px';
+
+                const btnCancel = document.createElement('button');
+                btnCancel.textContent = 'Cancelar';
+                btnCancel.className = 'btn';
+                btnCancel.style.padding = '8px 10px';
+
+                const btnConfirm = document.createElement('button');
+                btnConfirm.textContent = 'Executar';
+                btnConfirm.className = 'btn btn-primary';
+                btnConfirm.style.padding = '8px 10px';
+
+                actions.appendChild(btnCancel);
+                actions.appendChild(btnConfirm);
+
+                box.appendChild(title);
+                box.appendChild(ta);
+                box.appendChild(actions);
+                modal.appendChild(box);
+                document.body.appendChild(modal);
+
+                function closeModal() { try { modal.remove(); } catch(e){} }
+
+                btnCancel.addEventListener('click', (ev) => { ev.preventDefault(); closeModal(); });
+                btnConfirm.addEventListener('click', (ev) => {
+                    try {
+                        ev.preventDefault();
+                        const summaryPromptText = String(ta.value || '').trim();
+                        closeModal();
+
+                        // Enviar usando somente o prompt de resumo (override) sem tocar no system prompt global
+                        const chatInput = document.getElementById('chatInput');
+                        if (!chatInput) {
+                            appendChatMessage('user', normalHtml, true);
+                            showToast('Conteúdo enviado ao chat (local).', 'success');
+                        } else {
+                            chatInput.value = normalPlain;
+                            nextBotMessageIsResume = true;
+                            enviarMensagemChat(summaryPromptText);
+
+                            setTimeout(() => {
+                                try {
+                                    const msgs = getChatMessages();
+                                    for (let i = msgs.length - 1; i >= 0; i--) {
+                                        if (msgs[i].role === 'user') {
+                                            msgs[i].content = normalHtml;
+                                            msgs[i].html = true;
+                                            msgs[i].isUserResumeInput = true;
+                                            break;
+                                        }
+                                    }
+                                    saveChatHistory(msgs);
+                                    renderChatMessages(msgs);
+                                } catch (e) { console.warn('Erro ao substituir mensagem por HTML', e); }
+                            }, 80);
+                        }
+                        showToast('Conteúdo enviado ao chat.', 'success');
+                    } catch (err) { console.warn('resumir execute error', err); }
+                });
+
+            } catch (e) { console.warn('passoResumo erro', e); }
+        });
+    }
+
+    // observar mudanças nos editors para atualizar visibilidade do botão
+    try {
+        const obsConfig = { childList: true, subtree: true, characterData: true };
+        // Proteção: evitar que a edição em Passo a Passo reflita automaticamente no Normal.
+        let blockNormalUpdateWhenTypingPasso = false;
+        let normalContentBackup = '';
+        let _passoTypingTimeout = null;
+        let passoTypedAt = 0;
+
+            if (passoEl) {
+            const moPasso = new MutationObserver(() => updateCreatePassoButton());
+            moPasso.observe(passoEl, obsConfig);
+            passoEl.addEventListener('input', (ev) => {
+                try {
+                    // marcar que o usuário está digitando em Passo — bloquear updates auto no Normal
+                    blockNormalUpdateWhenTypingPasso = true;
+                    // guardar backup do Normal atual para restaurar se necessário
+                    if (contentEl) normalContentBackup = contentEl.innerHTML || '';
+                    // record timestamp para detectar mutações subsequentes no Normal
+                    try { passoTypedAt = Date.now(); } catch(e){}
+                    // limpar timeout anterior
+                    try { clearTimeout(_passoTypingTimeout); } catch(e){}
+                    _passoTypingTimeout = setTimeout(() => { blockNormalUpdateWhenTypingPasso = false; }, 1200);
+                } catch (e) {}
+                updateCreatePassoButton(ev);
+            });
+            passoEl.addEventListener('input', debounce(saveChatSidebarDraft, 300));
+            // também backup do Normal quando o usuário apenas focar no Passo
+            passoEl.addEventListener('focus', () => {
+                try { if (contentEl) normalContentBackup = contentEl.innerHTML || ''; } catch(e){}
+            });
+        }
+
+        if (contentEl) {
+            const moContent = new MutationObserver((mutations) => {
+                try {
+                    // Se o usuário editou Passo recentemente e o Normal foi modificado
+                    // para se tornar igual ao Passo, reverter para o backup.
+                    if (passoTypedAt && (Date.now() - passoTypedAt) < 3000 && passoEl) {
+                        const passoHtml = (passoEl.innerHTML || '').trim();
+                        const contentHtml = (contentEl.innerHTML || '').trim();
+                        if (contentHtml === passoHtml) {
+                            try { contentEl.innerHTML = normalContentBackup || ''; } catch(e){}
+                        }
+                    }
+                } catch (e) {}
+                updateCreatePassoButton();
+            });
+            moContent.observe(contentEl, obsConfig);
+            contentEl.addEventListener('input', updateCreatePassoButton);
+            contentEl.addEventListener('input', debounce(saveChatSidebarDraft, 300));
+        }
+    } catch (e) {}
+
+    // inicializar visibilidade do botão Resumir
+    updateCreatePassoButton();
+
+    // carregar prefill (pode conter docId)
+    try {
+        const raw = localStorage.getItem('dochub-chat-prefill');
+        let docId = null;
+        if (raw) {
+            const obj = JSON.parse(raw);
+            docId = obj.docId || null;
+        }
+        // se não houver docId, usar currentEditingId (se houver)
+        if (!docId && typeof currentEditingId !== 'undefined' && currentEditingId) docId = currentEditingId;
+        if (docId) carregarDocNoSidebar(docId);
+        // carregar rascunho salvo do sidebar (restaurará edições não salvas para o mesmo doc)
+        try { loadChatSidebarDraft(); } catch(e){}
+    } catch (e) {}
+
+    tabNormal?.addEventListener('click', () => {
+        tabNormal.classList.add('active'); tabPasso.classList.remove('active');
+        contentEl.style.display = ''; passoEl.style.display = 'none';
+        localStorage.setItem('dochub-chat-editor-tab', 'normal');
+        // marcar sidebar como modo normal (para estilização externa)
+        if (sidebar) {
+            sidebar.classList.add('normal-mode');
+            sidebar.classList.remove('passo-mode');
+        }
+        // aplicar modo ao elemento do chat (mensagens + input) e ao wrapper
+        if (chatContainer) {
+            chatContainer.classList.add('normal-mode');
+            chatContainer.classList.remove('passo-mode');
+        }
+        if (chatWrapper) {
+            chatWrapper.classList.add('normal-mode');
+            chatWrapper.classList.remove('passo-mode');
+        }
+        try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+        try { if (passoResumoWrapper) passoResumoWrapper.style.display = 'none'; } catch(e){}
+    });
+    tabPasso?.addEventListener('click', () => {
+        tabPasso.classList.add('active'); tabNormal.classList.remove('active');
+        passoEl.style.display = ''; contentEl.style.display = 'none';
+        localStorage.setItem('dochub-chat-editor-tab', 'passo');
+        if (sidebar) {
+            sidebar.classList.add('passo-mode');
+            sidebar.classList.remove('normal-mode');
+        }
+        if (chatContainer) {
+            chatContainer.classList.add('passo-mode');
+            chatContainer.classList.remove('normal-mode');
+        }
+        if (chatWrapper) {
+            chatWrapper.classList.add('passo-mode');
+            chatWrapper.classList.remove('normal-mode');
+        }
+        try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+        try { if (passoResumoWrapper) passoResumoWrapper.style.display = ''; } catch(e){}
+    });
+
+    // Função auxiliar para salvar documentações (reutilizada por múltiplos botões)
+    function saveDocumentationFromChat() {
+        try {
+            const rawDocs = localStorage.getItem(STORAGE_DOCS);
+            const docs = rawDocs ? JSON.parse(rawDocs) : [];
+            // identificar docId: pref de chat prefill ou currentChatOrigin
+            let docId = null;
+            const pre = localStorage.getItem('dochub-chat-prefill');
+            if (pre) {
+                try { const obj = JSON.parse(pre); docId = obj.docId || null; } catch(e) { }
+            }
+            if (!docId && currentChatOrigin && currentChatOrigin.docId) docId = currentChatOrigin.docId;
+            if (!docId && currentEditingId) docId = currentEditingId;
+
+            const normalEditor = document.getElementById('chatEditContent');
+            const passoEditor = document.getElementById('chatEditPassoContent');
+            const normalHtml = normalEditor ? normalEditor.innerHTML : '';
+            const passoHtml = passoEditor ? passoEditor.innerHTML : '';
+
+            // Se não houver docId, salvar no rascunho atual (não criar nova documentação)
+            if (!docId) {
+                try {
+                    // garantir que a sidebar seja salva primeiro
+                    try { saveChatSidebarDraft(); } catch (e) { }
+
+                    let draft = null;
+                    const rawDraft = localStorage.getItem(STORAGE_SIDEBAR_DRAFT);
+                    if (rawDraft) {
+                        try { draft = JSON.parse(rawDraft); } catch(e) { draft = null; }
+                    }
+
+                    // Se ainda não houver draft, reconstruir do prefill
+                    if (!draft) {
+                        const pre = localStorage.getItem('dochub-chat-prefill');
+                        if (pre) {
+                            try {
+                                const p = JSON.parse(pre);
+                                draft = {
+                                    docId: p.docId || null,
+                                    title: p.title || '',
+                                    description: p.description || '',
+                                    type: p.type || (p.isPasso ? 'passo-a-passo' : 'normal'),
+                                    content: p.content || '',
+                                    passo: p.passo || '',
+                                    tags: p.tags || '',
+                                    ts: Date.now()
+                                };
+                            } catch(_) {
+                                draft = null;
+                            }
+                        }
+                    }
+
+                    // Se ainda não houver rascunho, tentar salvar diretamente dos campos de adicionar se presentes
+                    if (!draft) {
+                        const titleEl = document.getElementById('docTitle');
+                        const descEl = document.getElementById('docDescription');
+                        const typeEl = document.getElementById('docType');
+                        const contentEl = document.getElementById('docContent');
+                        const passoEl = document.getElementById('docPassoContent');
+                        const tagsEl = document.getElementById('docTags');
+                        draft = {
+                            docId: null,
+                            title: titleEl ? String(titleEl.value || '') : '',
+                            description: descEl ? String(descEl.value || '') : '',
+                            type: typeEl ? String(typeEl.value || 'normal') : 'normal',
+                            content: contentEl ? (contentEl.innerHTML || '') : '',
+                            passo: passoEl ? (passoEl.innerHTML || '') : '',
+                            tags: tagsEl ? String(tagsEl.value || '') : '',
+                            ts: Date.now()
+                        };
+                    }
+
+                    if (!draft) {
+                        draft = {
+                            docId: null,
+                            title: '',
+                            description: '',
+                            type: 'normal',
+                            content: '',
+                            passo: '',
+                            tags: '',
+                            ts: Date.now()
+                        };
+                    }
+
+                    // Atualizar campos conhecidos do draft com base no prefill e chat
+                    try {
+                        const pre = localStorage.getItem('dochub-chat-prefill');
+                        if (pre) {
+                            const p = JSON.parse(pre);
+                            if (p.title) draft.title = p.title;
+                            if (p.description) draft.description = p.description;
+                            if (p.tags) draft.tags = p.tags;
+                            if (p.type) draft.type = p.type;
+                            if (p.isPasso && !draft.type) draft.type = 'passo-a-passo';
+                        }
+                    } catch (e) { }
+
+                    const docTitleEl = document.getElementById('docTitle');
+                    const docDescEl = document.getElementById('docDescription');
+                    const docTypeEl = document.getElementById('docType');
+                    const docContentEl = document.getElementById('docContent');
+                    const docPassoEl = document.getElementById('docPassoContent');
+                    const docTagsEl = document.getElementById('docTags');
+
+                    if (docTitleEl && docTitleEl.value.trim().length > 0) {
+                        draft.title = String(docTitleEl.value || '');
+                    }
+                    if (docDescEl && docDescEl.value.trim().length > 0) {
+                        draft.description = String(docDescEl.value || '');
+                    }
+                    if (docTagsEl && docTagsEl.value.trim().length > 0) {
+                        draft.tags = String(docTagsEl.value || '');
+                    }
+                    if (docTypeEl && String(docTypeEl.value).trim() !== '') {
+                        draft.type = String(docTypeEl.value);
+                    }
+                    if (docContentEl && docContentEl.innerHTML.trim().length > 0) {
+                        draft.content = docContentEl.innerHTML;
+                    }
+                    if (docPassoEl && docPassoEl.innerHTML.trim().length > 0) {
+                        draft.passo = docPassoEl.innerHTML;
+                    }
+
+                    const currentTab = localStorage.getItem('dochub-chat-editor-tab') || 'normal';
+                    // Prefer values from the Add form if present (docContent/docPassoContent),
+                    // otherwise use what's in the chat editors (normalHtml/passoHtml).
+                    try {
+                        const addNormalEl = document.getElementById('docContent');
+                        const addPassoEl = document.getElementById('docPassoContent');
+                        const addNormal = addNormalEl ? (addNormalEl.innerHTML || '').trim() : '';
+                        const addPasso = addPassoEl ? (addPassoEl.innerHTML || '').trim() : '';
+                        if (addNormal && addNormal.length > 0) {
+                            draft.content = addNormalEl.innerHTML;
+                        } else if (normalHtml && normalHtml.trim().length > 0) {
+                            draft.content = normalHtml;
+                        }
+                        if (addPasso && addPasso.length > 0) {
+                            draft.passo = addPassoEl.innerHTML;
+                        } else if (passoHtml && passoHtml.trim().length > 0) {
+                            draft.passo = passoHtml;
+                        }
+                    } catch (e) {
+                        if (normalHtml && normalHtml.trim().length > 0) draft.content = normalHtml;
+                        if (passoHtml && passoHtml.trim().length > 0) draft.passo = passoHtml;
+                    }
+                    if (!draft.type) {
+                        draft.type = (currentTab === 'passo') ? 'passo-a-passo' : 'normal';
+                    }
+                    draft.ts = Date.now();
+                    localStorage.setItem(STORAGE_SIDEBAR_DRAFT, JSON.stringify(draft));
+                    // backups and compatibility keys
+                    try { localStorage.setItem('dochub-debug-last-saved-draft', JSON.stringify(draft)); } catch(e) {}
+                    try { localStorage.setItem('dochub-chat-sidebar-draft-v2', JSON.stringify(draft)); } catch(e) {}
+                    // also set a prefill so chat opener / index can restore more reliably
+                    try {
+                        const prefillForIndex = { docId: draft.docId || null, title: draft.title || '', description: draft.description || '', content: draft.content || '', passo: draft.passo || '', tags: draft.tags || '', type: draft.type || 'normal', isPasso: (draft.type === 'passo-a-passo') };
+                        localStorage.setItem('dochub-chat-prefill', JSON.stringify(prefillForIndex));
+                    } catch(e) {}
+                    // also store a dedicated return payload so index.html can immediately restore when returning
+                    try {
+                        const returnPayload = { title: draft.title || '', description: draft.description || '', content: draft.content || '', passo: draft.passo || '', tags: draft.tags || '', type: draft.type || 'normal' };
+                        localStorage.setItem('dochub-chat-return-payload', JSON.stringify(returnPayload));
+                        try { sessionStorage.setItem('dochub-chat-session-return-payload', JSON.stringify(returnPayload)); } catch(e) {}
+                    } catch(e) {}
+                    try { if (typeof salvarDados === 'function') salvarDados(); } catch(e) {}
+
+                    localStorage.setItem('dochub-chat-return-section', 'adicionar');
+                    localStorage.setItem('dochub-chat-returning-from-adicionar', 'true');
+
+                    chatSavedSinceOpen = true;
+                    hasUnsavedChanges = false;
+                    showToast('✅ Rascunho atualizado com sucesso!', 'success');
+
+                    setTimeout(() => {
+                        if (window.location.pathname.toLowerCase().endsWith('chat.html')) {
+                            navigateToMainApp(localStorage.getItem('dochub-chat-return-section') || 'adicionar');
+                        } else {
+                            mudarSecao('adicionar');
+                            try { restaurarRascunhoAdicionar(); } catch(e) {}
+                        }
+                    }, 120);
+                    return;
+                } catch(e) {
+                    console.error('Erro ao salvar rascunho no chat', e);
+                    return showToast('❌ Falha ao salvar rascunho', 'error');
+                }
+            }
+
+            const idx = docs.findIndex(d => String(d.id) === String(docId) || d.id === docId);
+            if (idx === -1) return showToast('❌ Documento não encontrado', 'error');
+
+            const docToSave = docs[idx];
+            const addNormalEl = document.getElementById('docContent');
+            const addPassoEl = document.getElementById('docPassoContent');
+            const editTitleEl = document.getElementById('editDocTitle');
+            const editDescEl = document.getElementById('editDocDescription');
+            const editTagsEl = document.getElementById('editDocTags');
+            const editCategoryEl = document.getElementById('editDocCategory');
+            const addTitleEl = document.getElementById('docTitle');
+            const addDescEl = document.getElementById('docDescription');
+            const addTagsEl = document.getElementById('docTags');
+            const addTypeEl = document.getElementById('docType');
+            const storedNormal = docToSave.conteudo || '';
+            const storedPasso = docToSave.conteudoPasso || '';
+            const hasAddNormal = addNormalEl && addNormalEl.innerHTML && addNormalEl.innerHTML.trim().length > 0;
+            const hasAddPasso = addPassoEl && addPassoEl.innerHTML && addPassoEl.innerHTML.trim().length > 0;
+            const hasChatNormal = normalHtml && normalHtml.trim().length > 0;
+            const hasChatPasso = passoHtml && passoHtml.trim().length > 0;
+
+            // Prefer the richest available source for each side while preserving any existing content
+            // if the chat editors are empty. This avoids clearing one version when only the other was edited.
+            const finalNormal = hasAddNormal ? addNormalEl.innerHTML : (hasChatNormal ? normalHtml : storedNormal);
+            const finalPasso = hasAddPasso ? addPassoEl.innerHTML : (hasChatPasso ? passoHtml : storedPasso);
+
+            // Update the real document record, including visible metadata from either the edit or add form.
+            if (editTitleEl && String(editTitleEl.value || '').trim()) {
+                docToSave.titulo = String(editTitleEl.value || '');
+            } else if (addTitleEl && String(addTitleEl.value || '').trim()) {
+                docToSave.titulo = String(addTitleEl.value || '');
+            }
+            if (editDescEl && String(editDescEl.value || '').trim()) {
+                docToSave.descricao = String(editDescEl.value || '');
+            } else if (addDescEl && String(addDescEl.value || '').trim()) {
+                docToSave.descricao = String(addDescEl.value || '');
+            }
+            if (editTagsEl && String(editTagsEl.value || '').trim()) {
+                const tags = String(editTagsEl.value || '').split(',').map(t => t.trim()).filter(Boolean);
+                docToSave.tags = tags;
+            } else if (addTagsEl && String(addTagsEl.value || '').trim()) {
+                const tags = String(addTagsEl.value || '').split(',').map(t => t.trim()).filter(Boolean);
+                docToSave.tags = tags;
+            }
+            if (editCategoryEl && String(editCategoryEl.value || '').trim()) {
+                docToSave.categoria = String(editCategoryEl.value || '');
+            }
+            if (addTypeEl && String(addTypeEl.value || '').trim()) {
+                docToSave.type = String(addTypeEl.value || '');
+            }
+            docToSave.conteudo = finalNormal;
+            docToSave.conteudoPasso = finalPasso;
+            docToSave.dataAtualizacao = new Date().toLocaleDateString('pt-BR');
+
+            docs[idx] = docToSave;
+            localStorage.setItem(STORAGE_DOCS, JSON.stringify(docs));
+            // atualizar in-memory e refletir imediatamente na interface
+            documentacoes = docs;
+            try {
+                atualizarSelectsCategorias();
+                if (typeof filtrarPorCategoria === 'function') {
+                    filtrarPorCategoria(currentSelectedCategory || 'todos');
+                } else {
+                    renderizarDocumentacoes(documentacoes);
+                }
+                atualizarStats();
+            } catch (e) {}
+            // remover rascunho salvo para este documento e substituir pelo conteúdo recém-salvo
+            try {
+                const rawDraft = localStorage.getItem(STORAGE_SIDEBAR_DRAFT);
+                if (rawDraft) {
+                    const d = JSON.parse(rawDraft);
+                    if (String(d.docId || '') === String(docId || '')) {
+                        localStorage.removeItem(STORAGE_SIDEBAR_DRAFT);
+                    }
+                }
+            } catch(e){}
+            try {
+                const returnPayload = {
+                    title: docToSave.titulo || '',
+                    description: docToSave.descricao || '',
+                    content: docToSave.conteudo || '',
+                    passo: docToSave.conteudoPasso || '',
+                    tags: Array.isArray(docToSave.tags) ? docToSave.tags.join(', ') : (docToSave.tags || ''),
+                    type: docToSave.type || 'normal'
+                };
+                localStorage.setItem('dochub-chat-return-payload', JSON.stringify(returnPayload));
+                sessionStorage.setItem('dochub-chat-session-return-payload', JSON.stringify(returnPayload));
+                localStorage.setItem('dochub-chat-prefill', JSON.stringify({
+                    docId: docToSave.id,
+                    title: returnPayload.title,
+                    description: returnPayload.description,
+                    content: returnPayload.content,
+                    passo: returnPayload.passo,
+                    tags: returnPayload.tags,
+                    type: returnPayload.type,
+                    isPasso: returnPayload.type === 'passo-a-passo'
+                }));
+            } catch(e){}
+            // marcar como salvo para evitar confirmação de sair
+            chatSavedSinceOpen = true;
+            hasUnsavedChanges = false;
+            showToast('✅ Documentação salva com sucesso!', 'success');
+
+            // se estiver em página standalone, voltar 1 página
+            setTimeout(() => {
+                if (window.location.pathname.toLowerCase().endsWith('chat.html')) {
+                    navigateToMainApp(localStorage.getItem('dochub-chat-return-section') || 'documentos');
+                } else {
+                    // Se for no index com chat embutido, apenas muda para seção de documentos
+                    mudarSecao('documentos');
+                }
+            }, 120);
+        } catch (e) {
+            console.error('Erro ao salvar doc pelo chat', e);
+            chatSavedSinceOpen = false;
+            showToast('❌ Falha ao salvar', 'error');
+        }
+    }
+
+    // Ligar evento ao botão de salvar (legacy: se existir no editor)
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveDocumentationFromChat);
+    }
+
+    // Ligar evento ao botão de salvar do topo (novo)
+    const chatSaveDocsBtn = document.getElementById('chatSaveDocsBtn');
+    if (chatSaveDocsBtn) {
+        chatSaveDocsBtn.addEventListener('click', saveDocumentationFromChat);
+    }
+
+    // ouvir mudanças de storage para sincronizar com modal de edição em outras abas
+    window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_DOCS) {
+            try {
+                documentacoes = e.newValue ? JSON.parse(e.newValue) : [];
+                // se edit modal aberto, atualizar seu conteúdo
+                const editModal = document.getElementById('editModal');
+                if (editModal && editModal.classList.contains('show') && currentEditingId) {
+                    const d = documentacoes.find(x => String(x.id) === String(currentEditingId));
+                    if (d) {
+                        document.getElementById('editDocContent').innerHTML = d.conteudo || '';
+                        document.getElementById('editDocPassoContent').innerHTML = d.conteudoPasso || '';
+                    }
+                }
+            } catch (_) {}
+        }
+    });
+}
+
+// toggle do editor lateral (colapsável)
+document.addEventListener('DOMContentLoaded', () => {
+    const toggle = document.getElementById('chatEditorToggle');
+    const sidebar = document.getElementById('chatSidebarEditor');
+    const chatMain = document.querySelector('.chat-main');
+    const chatContainer = document.querySelector('.chat-container');
+    const tabNormal = document.getElementById('editorTabNormal');
+    const tabPasso = document.getElementById('editorTabPasso');
+    const contentEl = document.getElementById('chatEditContent');
+    const passoEl = document.getElementById('chatEditPassoContent');
+    
+    if (!toggle || !sidebar) return;
+    
+    // restaurar estado aberto/fechado
+    try {
+        const wasOpen = localStorage.getItem('dochub-chat-editor-open') === 'true';
+        // evitar transições visíveis durante a inicialização que causam flicker
+        if (sidebar) {
+            sidebar.style.transition = 'none';
+        }
+        if (wasOpen) {
+            sidebar.classList.add('open');
+            if (chatMain) chatMain.classList.remove('editor-closed');
+            document.body.classList.remove('chat-editor-closed');
+            // também restaurar a aba
+            if (tabNormal && tabPasso) {
+                const savedTab = localStorage.getItem('dochub-chat-editor-tab') || 'normal';
+                if (savedTab === 'passo') {
+                    tabPasso.classList.add('active');
+                    tabNormal.classList.remove('active');
+                    passoEl.style.display = '';
+                    contentEl.style.display = 'none';
+                    // aplicar classe passo-mode no sidebar e no container do chat
+                    if (sidebar) { sidebar.classList.add('passo-mode'); sidebar.classList.remove('normal-mode'); }
+                    if (chatContainer) { chatContainer.classList.add('passo-mode'); chatContainer.classList.remove('normal-mode'); }
+                    const chatWrapper = document.querySelector('.chat-wrapper');
+                    if (chatWrapper) { chatWrapper.classList.add('passo-mode'); chatWrapper.classList.remove('normal-mode'); }
+                    try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+                } else {
+                    tabNormal.classList.add('active');
+                    tabPasso.classList.remove('active');
+                    contentEl.style.display = '';
+                    passoEl.style.display = 'none';
+                    // aplicar classe normal-mode no sidebar e no container do chat
+                    if (sidebar) { sidebar.classList.add('normal-mode'); sidebar.classList.remove('passo-mode'); }
+                    if (chatContainer) { chatContainer.classList.add('normal-mode'); chatContainer.classList.remove('passo-mode'); }
+                    const chatWrapper = document.querySelector('.chat-wrapper');
+                    if (chatWrapper) { chatWrapper.classList.add('normal-mode'); chatWrapper.classList.remove('passo-mode'); }
+                    try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+                }
+            }
+        } else {
+            if (chatMain) chatMain.classList.add('editor-closed');
+            document.body.classList.add('chat-editor-closed');
+        }
+        // restaurar transição após ajuste inicial (pequeno delay para garantir layout)
+        if (sidebar) {
+            setTimeout(() => { try { sidebar.style.transition = ''; } catch(e){} }, 60);
+        }
+    } catch (e) {}
+    
+    toggle.addEventListener('click', () => {
+        const isOpening = !sidebar.classList.contains('open');
+
+        // elementos para animação coordenada
+        const chatWrapper = document.querySelector('.chat-wrapper');
+        const chatMainEl = chatMain;
+
+        // salvar estado de abertura (será atualizado após animação quando fechando)
+        localStorage.setItem('dochub-chat-editor-open', isOpening);
+
+        // alternar estado do sidebar de forma imediata (sem animações)
+        sidebar.classList.toggle('open');
+        const nowOpen = sidebar.classList.contains('open');
+        if (nowOpen) {
+            if (chatMainEl) chatMainEl.classList.remove('editor-closed');
+            document.body.classList.remove('chat-editor-closed');
+        } else {
+            if (chatMainEl) chatMainEl.classList.add('editor-closed');
+            document.body.classList.add('chat-editor-closed');
+            // limpar classes de modo (garantir que a borda não fique visível)
+            if (chatContainer) { chatContainer.classList.remove('normal-mode'); chatContainer.classList.remove('passo-mode'); }
+            if (chatWrapper) { chatWrapper.classList.remove('normal-mode'); chatWrapper.classList.remove('passo-mode'); }
+            try { document.body.classList.remove('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+        }
+
+        // restaurar aba salva apenas quando abrindo
+        if (isOpening && tabNormal && tabPasso) {
+            try {
+                const savedTab = localStorage.getItem('dochub-chat-editor-tab') || 'normal';
+                if (savedTab === 'passo') {
+                    tabPasso.classList.add('active');
+                    tabNormal.classList.remove('active');
+                    passoEl.style.display = '';
+                    contentEl.style.display = 'none';
+                            if (chatContainer) { chatContainer.classList.add('passo-mode'); chatContainer.classList.remove('normal-mode'); }
+                            const cw = document.querySelector('.chat-wrapper'); if (cw) { cw.classList.add('passo-mode'); cw.classList.remove('normal-mode'); }
+                            try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+                } else {
+                    tabNormal.classList.add('active');
+                    tabPasso.classList.remove('active');
+                    contentEl.style.display = '';
+                    passoEl.style.display = 'none';
+                            if (chatContainer) { chatContainer.classList.add('normal-mode'); chatContainer.classList.remove('passo-mode'); }
+                            const cw = document.querySelector('.chat-wrapper'); if (cw) { cw.classList.add('normal-mode'); cw.classList.remove('passo-mode'); }
+                            try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+                }
+            } catch (e) {}
+        }
+    });
+    // O painel só fecha quando o usuário clicar novamente no ícone toggle
+});
+
+function carregarDocNoSidebar(docId) {
+    try {
+        const raw = localStorage.getItem(STORAGE_DOCS);
+        if (!raw) return;
+        const docs = JSON.parse(raw);
+        const doc = docs.find(d => String(d.id) === String(docId) || d.id === docId);
+        if (!doc) return;
+        const contentEl = document.getElementById('chatEditContent');
+        const passoEl = document.getElementById('chatEditPassoContent');
+        if (contentEl) contentEl.innerHTML = doc.conteudo || '';
+        if (passoEl) passoEl.innerHTML = doc.conteudoPasso || '';
+        // set currentEditingId for future saves
+        currentEditingId = doc.id;
+    } catch (e) { console.warn('carregarDocNoSidebar erro', e); }
+}
+
+// ensure index page updates when docs in localStorage change
+window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_DOCS) {
+        try { documentacoes = e.newValue ? JSON.parse(e.newValue) : []; } catch(_){}
+    }
+});
+
+function restaurarEstadoInterfaceReordenacao() {
+    const seletores = [
+        '.nav-link',
+        '.btn-primary',
+        '.btn-secondary',
+        '.search-btn',
+        '.view-btn',
+        '#reorderDocsBtn',
+        '#addCategoryBtn',
+        '.category-item-edit',
+        '.category-item-delete',
+        '.doc-card',
+        '.category-item',
+        'input',
+        'textarea',
+        'select',
+        '.sidebar-title',
+        '.navbar-title',
+        '.logo-icon'
+    ].join(', ');
+
+    document.querySelectorAll(seletores).forEach(el => {
+        el.classList.remove('disabled-reorder');
+        el.style.pointerEvents = '';
+        el.style.opacity = '';
+        el.style.filter = '';
+
+        if (el.matches('input, textarea, select')) {
+            el.disabled = false;
+            el.removeAttribute('disabled');
+        }
+    });
+
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.classList.remove('disabled-reorder');
+        searchInput.style.pointerEvents = '';
+        searchInput.style.opacity = '';
+        searchInput.style.filter = '';
+        searchInput.disabled = false;
+        searchInput.removeAttribute('disabled');
     }
 }
 
@@ -185,54 +2017,206 @@ function bloquearInterfaceReordenacao(bloquear) {
         });
         
     } else {
-
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.style.pointerEvents = '';
-            link.style.opacity = '';
-            link.style.filter = '';
-        });
-
-        document.querySelectorAll('.btn-primary, .btn-secondary').forEach(btn => {
-            btn.style.pointerEvents = '';
-            btn.style.opacity = '';
-            btn.style.filter = '';
-        });
-
-        const elementosEspecificos = [
-            '#addCategoryBtn',      // Botão adicionar categoria
-            '.search-btn',          // Botão buscar
-            '.view-btn',            // Botões Grid/Lista
-            '#openAiBtn',           // Botão IA flutuante
-            '.category-item-edit',  // Botões editar categoria
-            '.category-item-delete' // Botões excluir categoria
-        ];
-        
-        elementosEspecificos.forEach(seletor => {
-            document.querySelectorAll(seletor).forEach(elemento => {
-                elemento.style.pointerEvents = '';
-                elemento.style.opacity = '';
-                elemento.style.filter = '';
-            });
-        });
-
-        document.querySelectorAll('.doc-card, .category-item').forEach(item => {
-            item.style.pointerEvents = '';
-            item.style.opacity = '';
-            item.style.filter = '';
-        });
-
-        document.querySelectorAll('input, textarea, select').forEach(input => {
-            input.style.pointerEvents = '';
-            input.style.opacity = '';
-        });
+        restaurarEstadoInterfaceReordenacao();
     }
 }
 
 /* ===================== CHAT IA - implementação leve ===================== */
 const STORAGE_CHAT = 'dochub-chat-histories';
+const STORAGE_CHAT_SCOPE = 'dochub-chat-scope';
+const STORAGE_SIDEBAR_DRAFT = 'dochub-chat-sidebar-draft';
+
+function getChatStorageData() {
+    try {
+        const raw = localStorage.getItem(STORAGE_CHAT);
+        if (!raw) return { global: [], docs: {} };
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            return { global: parsed, docs: {} };
+        }
+        if (parsed && typeof parsed === 'object') {
+            const global = Array.isArray(parsed.global) ? parsed.global : [];
+            const docs = (parsed.docs && typeof parsed.docs === 'object') ? parsed.docs : {};
+            return { global, docs };
+        }
+    } catch (e) {
+        console.warn('Erro ao ler chatStorageData:', e);
+    }
+    return { global: [], docs: {} };
+}
+
+function setChatStorageData(data) {
+    try {
+        localStorage.setItem(STORAGE_CHAT, JSON.stringify(data));
+    } catch (e) {
+        console.warn('Erro ao salvar chatStorageData:', e);
+    }
+}
+
+async function persistChatStateToServer() {
+    try {
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'chat', data: getChatStorageData() })
+        });
+    } catch (e) {
+        console.warn('Falha ao persistir chat no servidor', e);
+    }
+}
+
+function getChatScopeKey(docId = currentChatDocId) {
+    if (docId === null || docId === undefined || String(docId).trim() === '') return 'global';
+    return String(docId);
+}
+
+function getChatMessagesForScope(docId = currentChatDocId) {
+    const storage = getChatStorageData();
+    const key = getChatScopeKey(docId);
+    if (key === 'global') return Array.isArray(storage.global) ? storage.global : [];
+    if (!storage.docs || typeof storage.docs !== 'object') return [];
+    const messages = storage.docs[key];
+    if (Array.isArray(messages)) return messages;
+    return [];
+}
+
+function saveChatHistory(messages, docId = currentChatDocId) {
+    const storage = getChatStorageData();
+    const key = getChatScopeKey(docId);
+    if (key === 'global') {
+        storage.global = Array.isArray(messages) ? messages : [];
+    } else {
+        if (!storage.docs || typeof storage.docs !== 'object') storage.docs = {};
+        storage.docs[key] = Array.isArray(messages) ? messages : [];
+    }
+    setChatStorageData(storage);
+    persistChatStateToServer();
+}
+
+function setChatScope(docId) {
+    if (docId !== null && docId !== undefined && String(docId).trim() !== '') {
+        currentChatDocId = docId;
+        localStorage.setItem(STORAGE_CHAT_SCOPE, JSON.stringify({ docId: currentChatDocId }));
+        try {
+            const title = getDocumentTitleById(docId);
+            setChatScopeBanner(`Chat da documentação: ${title}`);
+        } catch (e) {
+            setChatScopeBanner(`Chat da documentação: ${docId}`);
+        }
+    } else {
+        currentChatDocId = null;
+        localStorage.removeItem(STORAGE_CHAT_SCOPE);
+        clearChatScopeBanner();
+    }
+}
+
+function restoreChatScopeFromStorage() {
+    try {
+        const raw = localStorage.getItem(STORAGE_CHAT_SCOPE);
+        if (!raw) {
+            currentChatDocId = null;
+            clearChatScopeBanner();
+            return;
+        }
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.docId !== undefined && parsed.docId !== null && String(parsed.docId).trim() !== '') {
+            currentChatDocId = parsed.docId;
+            const title = getDocumentTitleById(currentChatDocId);
+            setChatScopeBanner(`Chat da documentação: ${title}`);
+        } else {
+            currentChatDocId = null;
+            clearChatScopeBanner();
+        }
+    } catch (e) {
+        currentChatDocId = null;
+        clearChatScopeBanner();
+    }
+}
+
+function getDocumentTitleById(docId) {
+    if (!docId) return 'Desconhecido';
+    const doc = documentacoes.find(d => String(d.id) === String(docId));
+    if (doc && doc.titulo) return doc.titulo;
+    if (doc && doc.title) return doc.title;
+    return `Documento ${docId}`;
+}
+
+function saveChatSidebarDraft() {
+    try {
+        const contentEl = document.getElementById('chatEditContent');
+        const passoEl = document.getElementById('chatEditPassoContent');
+        const draft = {
+            docId: currentEditingId || null,
+            content: contentEl ? contentEl.innerHTML : '',
+            passo: passoEl ? passoEl.innerHTML : '',
+            ts: Date.now()
+        };
+        localStorage.setItem(STORAGE_SIDEBAR_DRAFT, JSON.stringify(draft));
+    } catch (e) { /* silencioso */ }
+}
+
+function loadChatSidebarDraft() {
+    try {
+        const raw = localStorage.getItem(STORAGE_SIDEBAR_DRAFT) || localStorage.getItem('dochub-chat-prefill');
+        if (!raw) return null;
+        const draft = JSON.parse(raw);
+        // Only restore if draft belongs to currentEditingId OR no doc is selected
+        if (draft) {
+            const contentEl = document.getElementById('chatEditContent');
+            const passoEl = document.getElementById('chatEditPassoContent');
+            // If draft has a docId but currentEditingId is not set, assume user was editing that doc before reload
+            if (draft.docId && (!currentEditingId || String(currentEditingId) === '')) {
+                try {
+                    currentEditingId = draft.docId;
+                    carregarDocNoSidebar(draft.docId);
+                } catch (e) { /* ignore */ }
+            }
+
+            // restore if docId matches or if draft has no docId (global draft)
+            if (!draft.docId || String(draft.docId || '') === String(currentEditingId || '')) {
+                try {
+                    // Preencher ambos os campos se houver conteúdo, sem apagar o outro.
+                    if (contentEl && typeof draft.content !== 'undefined') contentEl.innerHTML = draft.content || '';
+                    if (passoEl && typeof draft.passo !== 'undefined') passoEl.innerHTML = draft.passo || '';
+
+                    // Apenas controlar visibilidade/aba ativa com base na preferência,
+                    // mas NÃO limpar o conteúdo do outro editor.
+                    const preferredTab = localStorage.getItem('dochub-chat-editor-tab') || 'normal';
+                    const tabNormal = document.getElementById('editorTabNormal');
+                    const tabPasso = document.getElementById('editorTabPasso');
+                    if (preferredTab === 'passo') {
+                        if (contentEl) contentEl.style.display = 'none';
+                        if (passoEl) passoEl.style.display = '';
+                        if (tabPasso) tabPasso.classList.add('active');
+                        if (tabNormal) tabNormal.classList.remove('active');
+                    } else {
+                        if (contentEl) contentEl.style.display = '';
+                        if (passoEl) passoEl.style.display = 'none';
+                        if (tabNormal) tabNormal.classList.add('active');
+                        if (tabPasso) tabPasso.classList.remove('active');
+                    }
+                } catch (e) {
+                    if (contentEl && draft.content) contentEl.innerHTML = draft.content;
+                    if (passoEl && draft.passo) passoEl.innerHTML = draft.passo;
+                }
+            }
+        }
+        return draft;
+    } catch (e) { return null; }
+}
+
+function debounce(fn, wait = 250) {
+    let t;
+    return function(...args) {
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(this, args), wait);
+    };
+}
 
 function inicializarChat() {
-    // load histories
+    // restore chat scope (document-specific if available) and then load corresponding history
+    restoreChatScopeFromStorage();
     loadChatHistory();
 
     // attach send button listeners (support two possible IDs)
@@ -243,25 +2227,50 @@ function inicializarChat() {
     if (chatInput) {
         chatInput.addEventListener('keyup', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
+                if (chatMentionSelectionBlockedSend) {
+                    e.preventDefault();
+                    chatMentionSelectionBlockedSend = false;
+                    return;
+                }
                 e.preventDefault();
                 enviarMensagemChat();
             }
+        });
+        // focus class handled elsewhere; ensure input exists
+    }
+
+    // Delegation: clicar em uma mensagem do bot alterna o estado 'selected'
+    // EXCETO se for mensagem de resumo (bot-resume) - essas não devem ser clicáveis
+    const chatMessagesContainer = document.getElementById('chatMessages');
+    if (chatMessagesContainer) {
+        chatMessagesContainer.addEventListener('click', (e) => {
+            try {
+                const msgEl = e.target.closest('.chat-message');
+                if (!msgEl) return;
+                if (!msgEl.classList.contains('bot')) return; // apenas bot messages
+                if (msgEl.classList.contains('bot-resume')) return; // bloquear resumo
+                const content = msgEl.querySelector('.message-content');
+                if (!content) return;
+                // evitar clique em botões internos (ex: resume actions)
+                if (e.target.closest('button')) return;
+                // alterna seleção
+                const isSelected = content.classList.toggle('selected');
+                // opcional: colocar atributo para acessibilidade
+                content.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+            } catch (err) { console.warn('toggle selected failed', err); }
         });
     }
 
     // Botão de voltar do Chat IA
     const chatBackBtn = document.getElementById('chatBackBtn');
     if (chatBackBtn) {
+        chatBackBtn.style.display = 'inline-flex';
         chatBackBtn.addEventListener('click', () => {
-            // Se estava criando documentação, volta pra seção de criar
-            if (previousSection === 'adicionar') {
-                mudarSecao('adicionar');
-            } else {
-                // Se estava editando, volta pra documentos E restaura modal
-                mudarSecao('documentos');
-                if (previousModalOpen) {
-                    setModalVisible(previousModalOpen, true);
-                }
+            goBackFromChat();
+            // if we're in-page, restore previous modal after navigation
+            const isStandalone = window.location.pathname.toLowerCase().endsWith('chat.html') || !document.getElementById('documentos');
+            if (!isStandalone && previousModalOpen) {
+                setTimeout(() => setModalVisible(previousModalOpen, true), 150);
             }
         });
     }
@@ -269,83 +2278,422 @@ function inicializarChat() {
     // support floating AI button id variations
     const floating = document.getElementById('floatingAiButton') || document.getElementById('openAiBtn');
     if (floating) {
-        floating.addEventListener('click', () => mudarSecao('chat'));
+        floating.addEventListener('click', () => openChat());
     }
+}
+
+function openChat(prefill = null) {
+    try {
+        const scopeDocId = (prefill && prefill.docId) ? prefill.docId : currentEditingId || null;
+        setChatScope(scopeDocId);
+        // Salvar seção de retorno para quando fechar o chat (inclui 'adicionar')
+        const currentSection = document.querySelector('.content-section.active')?.id || 'documentos';
+        localStorage.setItem('dochub-chat-return-section', currentSection);
+        if (currentSection === 'adicionar') {
+            localStorage.setItem('dochub-chat-returning-from-adicionar', 'true');
+        } else {
+            localStorage.removeItem('dochub-chat-returning-from-adicionar');
+        }
+
+        // Se estamos abrindo o chat a partir da tela de "Nova Documentação",
+        // gravar o rascunho atual do formulário para que o chat e o formulário
+        // compartilhem o mesmo conteúdo.
+        try {
+            // Se estivermos na tela de adicionar OU se os campos do formulário existirem
+            // (caso a detecção por classe falhe), construir rascunho do sidebar para
+            // garantir que o chat receba o conteúdo completo (HTML).
+            const titleEl = document.getElementById('docTitle');
+            const descEl = document.getElementById('docDescription');
+            const contentEl = document.getElementById('docContent');
+            const passoEl = document.getElementById('docPassoContent');
+            const tagsEl = document.getElementById('docTags');
+            if (currentSection === 'adicionar' || titleEl || contentEl || passoEl) {
+                const selectedType = document.getElementById('docType') ? document.getElementById('docType').value : 'normal';
+                const draftContent = contentEl ? (contentEl.innerHTML || '') : (prefill && prefill.content ? prefill.content : '');
+                const draftPasso = passoEl ? (passoEl.innerHTML || '') : (prefill && prefill.passo ? prefill.passo : '');
+                const draft = {
+                    docId: null,
+                    title: titleEl ? String(titleEl.value || '') : '',
+                    description: descEl ? String(descEl.value || '') : '',
+                    type: selectedType,
+                    content: draftContent,
+                    passo: draftPasso,
+                    tags: tagsEl ? String(tagsEl.value || '') : (prefill && prefill.tags ? String(prefill.tags) : ''),
+                    ts: Date.now()
+                };
+                localStorage.setItem(STORAGE_SIDEBAR_DRAFT, JSON.stringify(draft));
+                // also set prefill so chat.html will immediately merge and restore rich HTML content
+                try { localStorage.setItem('dochub-chat-prefill', JSON.stringify({ docId: null, content: draft.content, passo: draft.passo, isPasso: (document.getElementById('docType') ? document.getElementById('docType').value === 'passo-a-passo' : false), title: draft.title, tags: draft.tags })); } catch(e){}
+                try { localStorage.setItem('dochub-debug-openChat', JSON.stringify({ ts: Date.now(), section: currentSection })); } catch(e){}
+            }
+        } catch (e) { /* ignore draft save errors */ }
+
+        if (prefill) {
+            try {
+                if (prefill.isPasso) {
+                    localStorage.setItem('dochub-chat-editor-tab', 'passo');
+                } else {
+                    localStorage.setItem('dochub-chat-editor-tab', 'normal');
+                }
+            } catch (e) {}
+            localStorage.setItem('dochub-chat-prefill', JSON.stringify(prefill));
+            try {
+                const sidebarDraft = {
+                    docId: prefill.docId || null,
+                    title: prefill.title || '',
+                    description: prefill.description || '',
+                    type: prefill.type || (prefill.isPasso ? 'passo-a-passo' : 'normal'),
+                    content: prefill.content || '',
+                    passo: prefill.passo || '',
+                    tags: prefill.tags || '',
+                    ts: Date.now()
+                };
+                localStorage.setItem(STORAGE_SIDEBAR_DRAFT, JSON.stringify(sidebarDraft));
+            } catch (e) { }
+        } else {
+            localStorage.removeItem('dochub-chat-prefill');
+        }
+        // If opening chat from 'adicionar' and there is no docId (new doc),
+        // mark chat to open with empty history to avoid showing unrelated messages.
+        try {
+            if (currentSection === 'adicionar' && (!scopeDocId || String(scopeDocId).trim() === '')) {
+                localStorage.setItem('dochub-chat-open-empty', 'true');
+            }
+        } catch (e) {}
+        try { localStorage.setItem('dochub-debug-openChat-meta', JSON.stringify({ ts: Date.now(), prefill: !!prefill })); } catch(e){}
+        chatSavedSinceOpen = false;
+        // Suprimir o aviso de alteração não salva porque estamos navegando
+        // intencionalmente para a tela de Chat IA e já salvamos o rascunho.
+        try { suppressUnsavedWarning = true; } catch (e) {}
+    } catch (e) { }
+    // Se o chat está embutido, popular editores imediatamente a partir do prefill ou do draft
+    try {
+        const chatContentEl = document.getElementById('chatEditContent');
+        const chatPassoEl = document.getElementById('chatEditPassoContent');
+        if (chatContentEl || chatPassoEl) {
+            let toUse = null;
+            if (prefill) {
+                toUse = { content: prefill.content || '', passo: prefill.passo || '', isPasso: !!prefill.isPasso };
+            } else {
+                try { const raw = localStorage.getItem(STORAGE_SIDEBAR_DRAFT); toUse = raw ? JSON.parse(raw) : null; } catch(e){ toUse = null; }
+            }
+            try {
+                const tab = localStorage.getItem('dochub-chat-editor-tab') || (toUse && toUse.isPasso ? 'passo' : 'normal');
+                if (chatContentEl && typeof toUse?.content !== 'undefined') chatContentEl.innerHTML = toUse.content || '';
+                if (chatPassoEl && typeof toUse?.passo !== 'undefined') chatPassoEl.innerHTML = toUse.passo || '';
+                const tabPasso = document.getElementById('editorTabPasso');
+                const tabNormal = document.getElementById('editorTabNormal');
+                if (tab === 'passo') {
+                    if (chatContentEl) chatContentEl.style.display = 'none';
+                    if (chatPassoEl) chatPassoEl.style.display = '';
+                    if (tabPasso) tabPasso.classList.add('active');
+                    if (tabNormal) tabNormal.classList.remove('active');
+                    try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+                } else {
+                    if (chatContentEl) chatContentEl.style.display = '';
+                    if (chatPassoEl) chatPassoEl.style.display = 'none';
+                    if (tabNormal) tabNormal.classList.add('active');
+                    if (tabPasso) tabPasso.classList.remove('active');
+                    try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+                }
+            } catch(e){}
+        }
+    } catch(e) {}
+    // mudar de página após breve timeout para garantir que a flag seja aplicada
+    setTimeout(() => { window.location.href = 'chat.html'; }, 10);
 }
 
 function loadChatHistory() {
     try {
-        const raw = localStorage.getItem(STORAGE_CHAT);
-        if (!raw) return;
-        const histories = JSON.parse(raw);
-        // render last session or combined messages
-        renderChatMessages(histories || []);
+        const messages = getChatMessages();
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            renderChatMessages([]);
+            return;
+        }
+        renderChatMessages(messages);
     } catch (e) { console.warn('Erro ao carregar histórico do chat', e); }
 }
 
-function saveChatHistory(messages) {
-    try {
-        localStorage.setItem(STORAGE_CHAT, JSON.stringify(messages));
-    } catch (e) { console.warn('Erro ao salvar histórico do chat', e); }
+function getChatMessages() {
+    return getChatMessagesForScope(currentChatDocId);
 }
 
-function getChatMessages() {
-    const messagesRaw = localStorage.getItem(STORAGE_CHAT);
-    if (!messagesRaw) return [];
-    try { return JSON.parse(messagesRaw); } catch (e) { return []; }
+// Build history for request: sliding window (last N) + optional lightweight client-side summary
+function buildHistoryForRequest(options = { windowSize: 40, summaryThreshold: 120 }) {
+    const all = getChatMessages() || [];
+    const total = all.length;
+    const windowSize = options.windowSize || 40;
+    const summaryThreshold = options.summaryThreshold || 120;
+
+    // if small enough, return last window directly
+    if (total <= windowSize) return all.slice(-windowSize);
+
+    // build a lightweight summary of older messages (not sent to backend for heavy summarization)
+    const older = all.slice(0, Math.max(0, total - windowSize));
+    const recent = all.slice(Math.max(0, total - windowSize));
+
+    // create a compact summary by extracting key sentences (naive): take the start of each older message
+    let excerpt = older.map(m => {
+        const txt = String(m.content || '');
+        return txt.split('\n')[0].slice(0, 200);
+    }).filter(Boolean).join(' | ');
+
+    if (excerpt.length > 1000) excerpt = excerpt.slice(0, 1000) + '...';
+
+    const summaryMsg = {
+        role: 'system',
+        content: `RESUMO_DO_HISTÓRICO: Há ${older.length} mensagens anteriores. Conteúdo resumido: ${excerpt}`
+    };
+
+    // return [summary, ...recent]
+    return [summaryMsg, ...recent];
 }
 
 function renderChatMessages(messages) {
     const container = document.getElementById('chatMessages');
     if (!container) return;
     container.innerHTML = '';
-    messages.forEach(m => {
+    messages.forEach((m, idx) => {
         const el = document.createElement('div');
         el.className = 'chat-message ' + (m.role === 'user' ? 'user' : 'bot');
+        if (m.isResume && m.role === 'bot') {
+            el.classList.add('bot-resume');
+        }
+        if (m.isUserResumeInput && m.role === 'user') {
+            el.classList.add('user-resume-input');
+        }
         const inner = document.createElement('div');
         inner.className = 'message-content';
-        inner.innerHTML = `<p>${escapeHtml(m.content).replace(/\n/g, '<br>')}</p>`;
+        if (m.html) {
+            inner.innerHTML = renderAiVisualImageTokens(m.content);
+        } else {
+            inner.innerHTML = renderAiVisualImageTokens(renderMessageHTML(m.content));
+        }
+        // tornar a bolha clicável: alterna a classe 'selected' para mostrar os bot-action-buttons
+        inner.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            try {
+                // remover seleção de outras mensagens
+                document.querySelectorAll('.message-content.selected').forEach(n => { if (n !== inner) n.classList.remove('selected'); });
+                inner.classList.toggle('selected');
+            } catch (e) { }
+        });
+
         el.appendChild(inner);
+
+        // Determinar se a mensagem aparenta ser um erro (ex.: começa com ❌ ou contém 'erro')
+        const messageText = (inner.textContent || '').trim();
+        const isErrorMsg = messageText.startsWith('❌') || /\berro\b/i.test(messageText) || /failed to fetch/i.test(messageText) || /api key/i.test(messageText.toLowerCase());
+
+        // Adicionar ícone azul (Normal) para mensagens do bot
+        // NÃO adicionar para mensagens de resumo (isResume) nem para mensagens de erro
+        // OBS: os botões serão inseridos DENTRO do elemento .message-content
+        if (m.role === 'bot' && !m.content.includes('Resumindo') && !m.isResume && !isErrorMsg) {
+            const botActions = document.createElement('div');
+            botActions.className = 'bot-action-buttons';
+            botActions.innerHTML = `
+                <button class="btn-save-normal" title="Salvar no Normal" data-msg-idx="${idx}"></button>
+            `;
+            // anexar DENTRO da bolha da mensagem (inner) para ficar logo abaixo do conteúdo
+            inner.appendChild(botActions);
+        }
+        
+        if (m.isResume && m.role === 'bot' && !m.content.includes('Resumindo')) {
+            const actions = document.createElement('div');
+            actions.className = 'resume-actions';
+            actions.innerHTML = `
+                <button class="resume-action-btn resume-copy" title="Copiar para Passo a Passo" data-msg-idx="${idx}">↘️</button>
+            `;
+            el.appendChild(actions);
+        }
+        
         container.appendChild(el);
     });
+    
+    // Event listeners para botões de ação do bot
+    container.querySelectorAll('.btn-save-normal').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const msgIdx = parseInt(this.getAttribute('data-msg-idx'));
+            const botMessage = messages[msgIdx];
+            if (!botMessage) return;
+            try {
+                const normalEl = document.getElementById('chatEditContent');
+                const sidebar = document.getElementById('chatSidebarEditor');
+                const chatMain = document.querySelector('.chat-main');
+                const chatContainer = document.querySelector('.chat-container');
+                const chatWrapper = document.querySelector('.chat-wrapper');
+                const tabNormal = document.getElementById('editorTabNormal');
+                const tabPasso = document.getElementById('editorTabPasso');
+                if (!normalEl) return;
+
+                // Toggle behavior: if already saved, restore previous content
+                if (this.classList.contains('saved')) {
+                    // restore backup if present
+                    try {
+                        const backup = this.dataset.backup || '';
+                        normalEl.innerHTML = backup ? decodeURIComponent(backup) : '';
+                        this.classList.remove('saved');
+                        // visual revert handled by CSS (.saved class)
+                        // update draft
+                        try { saveChatSidebarDraft(); } catch(e){}
+                    } catch (e) { console.warn('Erro ao restaurar backup', e); }
+                    return;
+                }
+
+                // Save current content as backup to allow revert
+                try { this.dataset.backup = encodeURIComponent(normalEl.innerHTML || ''); } catch(e){}
+
+                // Put bot message content into the Normal editor
+                if (botMessage.html) {
+                    normalEl.innerHTML = botMessage.content;
+                } else {
+                    normalEl.innerHTML = renderMessageHTML(botMessage.content);
+                }
+
+                // Open the sidebar editor and switch to Normal tab
+                try {
+                    if (sidebar) sidebar.classList.add('open');
+                    if (chatMain) chatMain.classList.remove('editor-closed');
+                    document.body.classList.remove('chat-editor-closed');
+                    if (tabNormal && tabPasso) {
+                        tabNormal.classList.add('active'); tabPasso.classList.remove('active');
+                    }
+                    if (chatContainer) { chatContainer.classList.add('normal-mode'); chatContainer.classList.remove('passo-mode'); }
+                    if (chatWrapper) { chatWrapper.classList.add('normal-mode'); chatWrapper.classList.remove('passo-mode'); }
+                    try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+                } catch (e) {}
+
+                // mark button as saved (visual state)
+                this.classList.add('saved');
+                try { saveChatSidebarDraft(); } catch(e){}
+            } catch (err) { console.warn('erro ao salvar no normal', err); }
+        });
+    });
+    
+    // clicar fora das mensagens remove seleção (esconde bot-action-buttons)
+    document.addEventListener('click', (ev) => {
+        try {
+            if (!ev.target.closest('.chat-messages')) {
+                document.querySelectorAll('.message-content.selected').forEach(n => n.classList.remove('selected'));
+            }
+        } catch(e) {}
+    });
+
+
+    
+    container.querySelectorAll('.resume-copy').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const msgIdx = parseInt(this.getAttribute('data-msg-idx'));
+            const resumeMessage = messages[msgIdx];
+            if (!resumeMessage) return;
+            try {
+                const passoEl = document.getElementById('chatEditPassoContent');
+                if (!passoEl) return;
+                if (resumeMessage.html) {
+                    passoEl.innerHTML = resumeMessage.content;
+                } else {
+                    passoEl.innerHTML = renderMessageHTML(resumeMessage.content);
+                }
+                saveChatSidebarDraft();
+                const tabPasso = document.getElementById('editorTabPasso');
+                if (tabPasso) tabPasso.click();
+                showToast('✅ Conteúdo copiado para Passo a Passo!', 'success');
+            } catch (e) {
+                console.error('[ERROR] resume-copy action error', e);
+                showToast('Erro ao copiar conteúdo.', 'error');
+            }
+        });
+    });
+    
     container.scrollTop = container.scrollHeight;
 }
 
-function appendChatMessage(role, content) {
+function setResumoEnabled(enabled) {
+    try {
+        const btn = document.getElementById('passoResumoBtn');
+        if (!btn) return;
+        btn.disabled = !enabled;
+        btn.style.opacity = enabled ? '' : '0.5';
+    } catch (e) {}
+}
+
+function appendChatMessage(role, content, isHtml = false, isResume = false, isUserResumeInput = false) {
     const messages = getChatMessages();
-    messages.push({ role, content, ts: Date.now() });
+    const msg = { role, content, ts: Date.now(), html: !!isHtml, isResume: !!isResume, isUserResumeInput: !!isUserResumeInput };
+    messages.push(msg);
     saveChatHistory(messages);
     renderChatMessages(messages);
     const container = document.getElementById('chatMessages');
     if (!container) return null;
-    return container.lastChild;
+    // retornar tanto o elemento quanto o ts para permitir atualização posterior
+    const el = container.lastChild;
+    el._msg_ts = msg.ts;
+    return el;
 }
 
-function enviarMensagemChat() {
+function updateChatMessageByTs(ts, newContent) {
+    try {
+        const messages = getChatMessages();
+        // localizar última ocorrência que corresponda ao ts
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].ts === ts) {
+                messages[i].content = newContent;
+                messages[i].isResume = nextBotMessageIsResume;
+                nextBotMessageIsResume = false;
+                saveChatHistory(messages);
+                renderChatMessages(messages);
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('updateChatMessageByTs erro', e);
+    }
+    return false;
+}
+
+function enviarMensagemChat(systemOverride = null) {
     const input = document.getElementById('chatInput');
     if (!input) return;
     const text = input.value.trim();
     if (!text) return;
     
-    // Verificar se tem API Key configurada
-    if (!aiConfig.apiKey) {
+    // Verificar se existe uma configuração de IA disponível no servidor/browser.
+    const effectiveApiKey = (aiConfig && aiConfig.apiKey) ? aiConfig.apiKey : '';
+    if (!effectiveApiKey) {
         appendChatMessage('user', text);
-        appendChatMessage('bot', '❌ API Key não configurada. Acesse as configurações para adicionar sua chave de IA.');
+        appendChatMessage('bot', '❌ Não há chave de IA configurada. Defina a chave no servidor ou nas configurações do app antes de usar o chat.');
         input.value = '';
         input.disabled = false;
         return;
     }
 
-    // Mostrar mensagem do usuário e loading
-    appendChatMessage('user', text);
+    // Avisar se não tem @ selecionado (não enviar para a IA),
+    // exceto quando um `systemOverride` for fornecido (ex: resumo) ou
+    // quando estamos explicitamente marcando a próxima mensagem como resumo.
+    const hasActiveCommand = activeChatCommandNames && activeChatCommandNames.length > 0;
+    const hasOverride = (typeof systemOverride === 'string' && systemOverride.trim());
+    if (!hasActiveCommand && !hasOverride && !nextBotMessageIsResume) {
+        appendChatMessage('user', text);
+        appendChatMessage('bot', '⚠️ Digite @ para enviar uma mensagem.');
+        input.value = '';
+        input.disabled = false;
+        return;
+    }
+
+    const backendMessage = text;
+    const displayedMessage = text;
+
+    appendChatMessage('user', displayedMessage);
     input.value = '';
     input.disabled = true;
-    const loadingEl = appendChatMessage('bot', '⏳ Pensando...') || null;
+    const loadingMsg = nextBotMessageIsResume ? '📋 Resumindo...' : '⏳ Pensando...';
+    const loadingEl = appendChatMessage('bot', loadingMsg, false, nextBotMessageIsResume) || null;
+    // marcar estado de processamento e desativar botão Resumir
+    isChatThinking = true;
+    try { setResumoEnabled(false); } catch(e){}
 
-    // timeout via AbortController
-    const controller = new AbortController();
-    const timeoutMs = 20000; // 20s timeout
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    // Removido timeout forçado: aguardar até a IA responder (sem abort automático)
 
     // Fazer requisição ao backend Python com timeout
     // Determinar modelo e provider (prefere configuração do aiConfig ou seleção atual)
@@ -353,90 +2701,211 @@ function enviarMensagemChat() {
     // Determinar provider: preferir configuração salva, senão inferir pelo nome do modelo
     let provider = aiConfig.provider || '';
     if (!provider) {
-        const name = selectedModel.toLowerCase();
-        if (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) provider = 'genai';
-        else provider = 'openai';
+        provider = inferProviderFromModel(selectedModel);
     }
 
     // Aplicar System Prompt estritamente: quando definido, enviamos uma
     // versão reforçada como instrução obrigatória para o modelo.
-    const effectiveSystemPrompt = (aiConfig.systemPrompt && aiConfig.systemPrompt.trim())
-        ? `INSTRUÇÃO OBRIGATÓRIA - SIGA ESTAS DIRETRIZES À RISCA:\n${aiConfig.systemPrompt}`
+    // Se um `systemOverride` foi passado (ex: prompt de resumo temporário),
+    // usá-lo como `system_prompt` para esta requisição sem alterar a configuração global.
+    const overridePrompt = (typeof systemOverride === 'string' && systemOverride.trim()) ? systemOverride.trim() : null;
+    const activeCommandsPrompt = getChatCommandsOverridePrompt();
+    const rawPrompt = overridePrompt || activeCommandsPrompt || ((aiConfig.systemPrompt && aiConfig.systemPrompt.trim()) ? aiConfig.systemPrompt.trim() : '');
+    const effectiveSystemPrompt = rawPrompt
+        ? [
+            'INSTRUÇÃO OBRIGATÓRIA - SIGA ESTAS DIRETRIZES À RISCA:',
+            rawPrompt,
+            '',
+            'REGRAS DE APLICAÇÃO (OBRIGATÓRIAS):',
+            '1) Trate o texto acima como um filtro e prioridade máxima ao processar qualquer pedido.',
+            '2) Se houver conflito entre o pedido do usuário e as diretrizes acima, priorize as diretrizes e explique brevemente o motivo.',
+            '3) Aplique as diretrizes acima sem inserir um cabeçalho adicional chamado "APLICAÇÃO DAS DIRETRIZES:" a menos que o usuário peça explicitamente.',
+            '4) Responda claramente à solicitação do usuário (se for possível segundo às diretrizes).',
+            '5) Responda em português, seja objetivo e cite quando algo foi omitido por conflito com as diretrizes.'
+        ].join('\n')
         : 'Você é um assistente útil';
 
-    fetch('http://localhost:5000/chat', {
+    const historyForSend = buildHistoryForRequest({ windowSize: 40, summaryThreshold: 120 });
+    // garantir que o system prompt também esteja disponível como campo separado (alguns backends usam este campo)
+    // e também como primeira mensagem do histórico para consistência
+    const historyWithSystem = [
+        { role: 'system', content: effectiveSystemPrompt },
+        ...historyForSend
+    ];
+
+    const body = {
+        api_key: effectiveApiKey,
+        model: selectedModel,
+        provider: provider,
+        message: backendMessage,
+        chat_mode: currentChatMode,
+        chat_intent: currentChatIntent,
+        system_prompt: effectiveSystemPrompt,
+        history: historyWithSystem
+    };
+
+    console.debug('[DEBUG] enviarMensagemChat -> sending message', {
+        backendMessage,
+        displayedMessage,
+        selectedModel,
+        provider,
+        hasActiveCommand,
+        hasOverride,
+        chatMode: currentChatMode,
+        chatIntent: currentChatIntent
+    });
+
+    fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            api_key: aiConfig.apiKey,
-            model: selectedModel,
-            provider: provider,
-            message: text,
-            system_prompt: effectiveSystemPrompt,
-            
-            history: []
-        }),
-        signal: controller.signal
+        body: JSON.stringify(body)
     })
-    .then(res => {
-        clearTimeout(timeoutId);
-        return res.json();
-    })
+    .then(res => res.json())
     .then(data => {
         if (!loadingEl) {
-            // fallback: render new bot message
-            if (!data.success) appendChatMessage('bot', `❌ Erro: ${data.error}`);
-            else appendChatMessage('bot', renderMessageHTML(data.response));
+            // fallback: persist new bot message
+            if (!data.success) appendChatMessage('bot', `❌ Erro: ${data.error || 'Não foi possível responder.'}`, false, nextBotMessageIsResume);
+            else appendChatMessage('bot', data.response || '', false, nextBotMessageIsResume);
+            nextBotMessageIsResume = false;
         } else {
-            if (!data.success) {
-                loadingEl.innerHTML = `<div class="message-content"><p>❌ Erro: ${data.error}</p></div>`;
+            // atualizar mensagem placeholder no histórico usando ts
+            const ts = loadingEl._msg_ts;
+            if (!ts) {
+                // se por algum motivo não temos ts, atualizar apenas o DOM
+                if (!data.success) {
+                    loadingEl.innerHTML = `<div class="message-content"><p>❌ Erro: ${data.error}</p></div>`;
+                } else {
+                    loadingEl.innerHTML = `<div class="message-content"><p>${renderMessageHTML(data.response)}</p></div>`;
+                }
             } else {
-                loadingEl.innerHTML = `<div class="message-content"><p>${renderMessageHTML(data.response)}</p></div>`;
+                if (!data.success) {
+                    updateChatMessageByTs(ts, `❌ Erro: ${data.error || 'Não foi possível responder.'}`);
+                } else {
+                    updateChatMessageByTs(ts, data.response || '');
+                }
             }
         }
+        // reativar controle de resumo
+        try { isChatThinking = false; setResumoEnabled(true); } catch(e){}
         input.disabled = false;
         input.focus();
     })
     .catch(err => {
-        const msg = err.name === 'AbortError' ?
-            'Tempo de resposta esgotado. Tente novamente.' :
-            `Erro de conexão: ${err.message}`;
+        const msg = `Erro de conexão: ${err.message}`;
         if (loadingEl) {
-            loadingEl.innerHTML = `<div class="message-content"><p>❌ ${msg}<br><small>Verifique se o backend está rodando em http://localhost:5000</small></p></div>`;
+            const ts = loadingEl._msg_ts;
+            if (ts) updateChatMessageByTs(ts, `❌ ${msg}`);
+            else loadingEl.innerHTML = `<div class="message-content"><p>❌ ${msg}</p></div>`;
         } else {
-            appendChatMessage('bot', `❌ ${msg}`);
+            appendChatMessage('bot', `❌ ${msg}`, false, nextBotMessageIsResume);
+            nextBotMessageIsResume = false;
         }
+        try { isChatThinking = false; setResumoEnabled(true); } catch(e){}
         input.disabled = false;
         input.focus();
     });
 }
 
-function sendEditorContentToChat(editorId, options = { isEdit: false, isPasso: false, autoSend: true }) {
+function sendEditorContentToChat(editorId, options = { isEdit: false, isPasso: false, autoSend: false }) {
     const editor = document.getElementById(editorId);
     if (!editor) return;
-    const text = (editor.innerText || editor.textContent || '').trim();
-    // open chat and prefill
-    mudarSecao('chat');
-    const input = document.getElementById('chatInput');
-    if (input) input.value = text;
-    currentChatOrigin = { type: options.isEdit ? 'edit' : 'create', docId: currentEditingId };
-    setChatScopeBanner(options.isEdit ? 'Discussão: edição' : 'Discussão: criação');
-    if (options.autoSend) enviarMensagemChat();
+    const html = (editor.innerHTML || '').trim();
+    const docId = currentEditingId || null;
+    setChatScope(docId);
+
+    // Build a prefill with both fields from the current active form.
+    // Prioritize edit fields when present to avoid reading the empty add-form fields.
+    const normalEl = document.getElementById('editDocContent') || document.getElementById('docContent');
+    const passoEl = document.getElementById('editDocPassoContent') || document.getElementById('docPassoContent');
+    const normalHtml = normalEl ? (normalEl.innerHTML || '').trim() : '';
+    const passoHtml = passoEl ? (passoEl.innerHTML || '').trim() : '';
+
+    const prefillPayload = {
+        isPasso: !!options.isPasso,
+        autoSend: !!options.autoSend,
+        origin: (options.isEdit ? 'edit' : 'create'),
+        docId: docId,
+        content: normalHtml,
+        passo: passoHtml
+    };
+
+    // Ensure at least the current editor content is present
+    if (options.isPasso) {
+        prefillPayload.passo = html;
+        if (!prefillPayload.content) prefillPayload.content = normalHtml;
+    } else {
+        prefillPayload.content = html;
+        if (!prefillPayload.passo) prefillPayload.passo = passoHtml;
+    }
+
+    openChat(prefillPayload);
+    currentChatOrigin = { type: options.isEdit ? 'edit' : 'create', docId: docId };
+    if (docId) setChatScopeBanner(`Chat da documentação: ${getDocumentTitleById(docId)}`);
+}
+
+function navigateToMainApp(section = 'documentos') {
+    try {
+        const safeSection = (section && ['documentos', 'exemplos', 'adicionar'].includes(section)) ? section : 'documentos';
+        const target = safeSection === 'documentos' ? 'index.html' : `index.html#${encodeURIComponent(safeSection)}`;
+        window.location.replace(target);
+    } catch (e) {
+        try { window.location.href = 'index.html'; } catch (err) {}
+    }
 }
 
 function goBackFromChat() {
-    // if came from edit, reopen edit modal
-    if (currentChatOrigin && currentChatOrigin.type === 'edit' && currentChatOrigin.docId) {
-        currentEditingId = currentChatOrigin.docId;
-        abrirEdicao();
+    const normalEditor = document.getElementById('chatEditContent');
+    const passoEditor = document.getElementById('chatEditPassoContent');
+    const hasText = (normalEditor && (normalEditor.innerText || normalEditor.textContent || '').trim().length > 0) ||
+                    (passoEditor && (passoEditor.innerText || passoEditor.textContent || '').trim().length > 0);
+    if (hasText && !chatSavedSinceOpen) {
+        const confirmLeave = window.confirm('Você tem conteúdo não salvo no editor de documentação. Tem certeza que deseja sair sem salvar?');
+        if (!confirmLeave) return;
+    }
+
+    const validSections = ['documentos', 'exemplos', 'adicionar'];
+    let targetSection = 'documentos';
+    const returnFromStorage = localStorage.getItem('dochub-chat-return-section');
+    const fromAdicionar = localStorage.getItem('dochub-chat-returning-from-adicionar') === 'true';
+    if (fromAdicionar) {
+        targetSection = 'adicionar';
+    } else if (returnFromStorage && validSections.includes(returnFromStorage)) {
+        targetSection = returnFromStorage;
+    }
+
+    try {
+        localStorage.setItem('dochub-chat-return-section', targetSection);
+        if (targetSection === 'adicionar') {
+            localStorage.setItem('dochub-chat-returning-from-adicionar', 'true');
+        } else {
+            localStorage.removeItem('dochub-chat-returning-from-adicionar');
+        }
+    } catch (e) {}
+
+    const isStandaloneChat = window.location.pathname.toLowerCase().endsWith('chat.html') || !document.getElementById('documentos');
+    try { localStorage.setItem('dochub-debug-goBack', JSON.stringify({ ts: Date.now(), hasText: !!hasText, chatSavedSinceOpen: !!chatSavedSinceOpen, returnFromStorage: returnFromStorage || null, targetSection: targetSection, isStandaloneChat: !!isStandaloneChat })); } catch(e){}
+
+    if (isStandaloneChat) {
+        try {
+            navigateToMainApp(targetSection || 'documentos');
+            return;
+        } catch (e) {
+            try { window.location.href = 'index.html'; } catch (err) {}
+            return;
+        }
+    }
+
+    try {
+        mudarSecao(targetSection);
+        if (targetSection === 'adicionar') {
+            restaurarRascunhoAdicionar();
+        }
         currentChatOrigin = null;
         clearChatScopeBanner();
-        return;
+    } catch (e) {
+        try { window.location.href = 'index.html'; } catch (err) {}
     }
-    // otherwise go back to documents
-    mudarSecao('documentos');
-    currentChatOrigin = null;
-    clearChatScopeBanner();
 }
 
 function setChatScopeBanner(text) {
@@ -457,8 +2926,46 @@ function clearChatScopeBanner() {
     try {
         const topBar = document.getElementById('chatTopBar');
         if (!topBar) return;
+        const icon = document.getElementById('chatModeIcon');
+        const pop = document.getElementById('chatModePopover');
         topBar.innerHTML = '';
+        if (icon) topBar.appendChild(icon);
+        if (pop) topBar.appendChild(pop);
     } catch (e) {}
+}
+
+window.addEventListener('beforeunload', () => {
+    try { salvarDados(); } catch (e) {}
+});
+
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        try { salvarDados(); } catch (e) {}
+    }
+});
+
+// Helper to populate intents based on mode
+function setChatMode(mode) {
+    currentChatMode = mode === 'passo' ? 'passo' : 'normal';
+    const intentSelect = document.getElementById('chatIntentSelect');
+    if (!intentSelect) return;
+    // clear
+    intentSelect.innerHTML = '';
+    if (currentChatMode === 'normal') {
+        intentSelect.innerHTML = `
+            <option value="tirar-duvidas">Tirar dúvidas</option>
+            <option value="criar-documentacao">Criar documentação</option>
+        `;
+        currentChatIntent = 'tirar-duvidas';
+    } else {
+        intentSelect.innerHTML = `
+            <option value="tirar-duvidas">Tirar dúvidas</option>
+            <option value="criar-passo">Criar passo a passo (a partir da doc)</option>
+        `;
+        currentChatIntent = 'tirar-duvidas';
+    }
+    // set selected value
+    intentSelect.value = currentChatIntent;
 }
 
 /* ===================== FIM CHAT IA ===================== */
@@ -494,21 +3001,128 @@ function restoreSelectionForEditor(editorId) {
     return false;
 }
 
-function carregarDados() {
-    const docs = localStorage.getItem(STORAGE_DOCS);
-    const exs = localStorage.getItem(STORAGE_EXEMPLOS);
-    const cats = localStorage.getItem(STORAGE_CATEGORIAS);
+function mostrarApp() {
+    const authGate = document.getElementById('authGate');
+    if (authGate) authGate.style.display = 'none';
+    const appContainer = document.getElementById('appContainer');
+    if (appContainer) appContainer.style.display = 'flex';
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) logoutBtn.style.display = 'none';
+}
 
-    categoriesLoadedFromStorage = cats !== null;
-    const ai = localStorage.getItem(STORAGE_AI);
+async function verificarSessao() {
+    try {
+        mostrarApp();
+        await carregarDados();
+    } catch (e) {
+        mostrarApp();
+    }
+}
 
-    documentacoes = docs ? JSON.parse(docs) : [];
-    exemplos = exs ? JSON.parse(exs) : [];
-    categorias = cats ? JSON.parse(cats) : [];
+function sincronizarUIComEstado() {
+    try { renderizarCategorias(); } catch (e) {}
+    try { atualizarSelectsCategorias(); } catch (e) {}
+    try { renderizarExemplos(); } catch (e) {}
+    try { renderizarDocumentacoes(documentacoes); } catch (e) {}
+    try { filtrarPorCategoria(currentSelectedCategory || 'todos'); } catch (e) {}
+    try { atualizarStats(); } catch (e) {}
+}
 
-    if (documentacoes.length === 0) {
-        documentacoes = [];
-        salvarDados();
+function restaurarUltimaSecao() {
+    const validSections = ['documentos', 'exemplos', 'adicionar'];
+    try {
+        const hash = (window.location.hash || '').replace('#', '').trim();
+        let sectionToRestore = null;
+
+        if (hash && validSections.includes(hash)) {
+            sectionToRestore = hash;
+        } else {
+            const stored = localStorage.getItem('dochub-chat-return-section');
+            if (stored && validSections.includes(stored)) {
+                sectionToRestore = stored;
+            }
+        }
+
+        if (!sectionToRestore) {
+            const current = document.querySelector('.content-section.active')?.id;
+            sectionToRestore = current && validSections.includes(current) ? current : 'documentos';
+        }
+
+        mudarSecao(sectionToRestore);
+
+        if (sectionToRestore === 'adicionar') {
+            setTimeout(() => {
+                try {
+                    if (typeof prepararNovaDocumentacao === 'function') prepararNovaDocumentacao();
+                    restaurarRascunhoAdicionar();
+                } catch (e) {}
+            }, 80);
+        }
+
+        return sectionToRestore;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function carregarDados() {
+    const backupState = getStateBackup();
+    const existingDocs = Array.isArray(documentacoes) ? documentacoes : [];
+    const existingExs = Array.isArray(exemplos) ? exemplos : [];
+    const existingCats = Array.isArray(categorias) ? categorias : [];
+    let loadedFromServer = false;
+
+    try {
+        const res = await fetch(apiUrl('/api/data'), { method: 'GET', credentials: 'include' });
+        if (res.ok) {
+            const payload = await res.json();
+            if (payload && payload.success && payload.data) {
+                const serverDocs = Array.isArray(payload.data.documents) ? payload.data.documents : [];
+                const serverExs = Array.isArray(payload.data.examples) ? payload.data.examples : [];
+                const serverCats = Array.isArray(payload.data.categories) ? payload.data.categories : [];
+                const hasServerState = serverDocs.length > 0 || serverExs.length > 0 || serverCats.length > 0;
+
+                if (hasServerState) {
+                    documentacoes = serverDocs.length > 0 ? serverDocs : (Array.isArray(backupState?.documents) ? backupState.documents : existingDocs);
+                    exemplos = serverExs.length > 0 ? serverExs : (Array.isArray(backupState?.examples) ? backupState.examples : existingExs);
+                    categorias = serverCats.length > 0 ? serverCats : (Array.isArray(backupState?.categories) ? backupState.categories : existingCats);
+                } else if (backupState) {
+                    documentacoes = Array.isArray(backupState.documents) ? backupState.documents : existingDocs;
+                    exemplos = Array.isArray(backupState.examples) ? backupState.examples : existingExs;
+                    categorias = Array.isArray(backupState.categories) ? backupState.categories : existingCats;
+                } else {
+                    documentacoes = existingDocs;
+                    exemplos = existingExs;
+                    categorias = existingCats;
+                }
+
+                if (payload.data.chat) {
+                    try { localStorage.setItem(STORAGE_CHAT, JSON.stringify(payload.data.chat)); } catch (e) {}
+                }
+                if (payload.data.ai) {
+                    aiConfig = Object.assign(aiConfig, payload.data.ai);
+                }
+                loadedFromServer = true;
+            }
+        }
+    } catch (e) {
+        const docs = localStorage.getItem(STORAGE_DOCS);
+        const exs = localStorage.getItem(STORAGE_EXEMPLOS);
+        const cats = localStorage.getItem(STORAGE_CATEGORIAS);
+        categoriesLoadedFromStorage = cats !== null;
+        documentacoes = docs ? JSON.parse(docs) : (backupState ? backupState.documents : []);
+        exemplos = exs ? JSON.parse(exs) : (backupState ? backupState.examples : []);
+        categorias = cats ? JSON.parse(cats) : (backupState ? backupState.categories : []);
+    }
+
+    if (!Array.isArray(documentacoes)) documentacoes = [];
+    if (!Array.isArray(exemplos)) exemplos = [];
+    if (!Array.isArray(categorias)) categorias = [];
+
+    if (documentacoes.length === 0 && categorias.length === 0 && exemplos.length === 0 && backupState) {
+        documentacoes = Array.isArray(backupState.documents) ? backupState.documents : [];
+        exemplos = Array.isArray(backupState.examples) ? backupState.examples : [];
+        categorias = Array.isArray(backupState.categories) ? backupState.categories : [];
     }
 
     if (categorias.length > 0 && typeof categorias[0] === 'string') {
@@ -544,23 +3158,164 @@ function carregarDados() {
         return d;
     });
     
-    if (ai) {
-        aiConfig = JSON.parse(ai);
-        const keyInput = document.getElementById('aiApiKey');
-        const modelInput = document.getElementById('aiModel');
-        if (keyInput) keyInput.value = aiConfig.apiKey;
-        if (modelInput) modelInput.value = aiConfig.model;
+    saveStateBackup();
+
+    const aiRaw = localStorage.getItem(STORAGE_AI);
+    if (aiRaw) {
+        try {
+            const parsedAiConfig = JSON.parse(aiRaw);
+            aiConfig = {
+                ...sanitizeAiConfigForStorage(parsedAiConfig || {}),
+                apiKey: aiConfig.apiKey || ''
+            };
+            const safePersitedConfig = sanitizeAiConfigForStorage(parsedAiConfig || {});
+            safePersitedConfig.apiKey = undefined;
+            localStorage.setItem(STORAGE_AI, JSON.stringify(safePersitedConfig));
+
+            // API Key (input exists in modal)
+            const keyInput = document.getElementById('aiApiKey');
+            if (keyInput) keyInput.value = aiConfig.apiKey || '';
+
+            // Model: there is no single element with id 'aiModel' (models are radios).
+            // Garantir que os radios reflitam o modelo salvo para que, ao dar F5,
+            // a seleção permaneça a mesma quando o usuário salvou anteriormente.
+            const modelRadios = document.querySelectorAll('input[name="aiModel"]');
+            const savedModel = normalizeAiModel(aiConfig.model, aiConfig.provider || inferProviderFromModel(aiConfig.model));
+            aiConfig.model = savedModel;
+            if (modelRadios && modelRadios.length > 0) {
+                modelRadios.forEach(r => { r.checked = (r.value === savedModel); });
+                // se nenhum radio bateu, mantém o primeiro como padrão
+                if (![...modelRadios].some(r => r.checked)) modelRadios[0].checked = true;
+            }
+
+            // Não carregar ou preencher `aiSystemPrompt` (removido da UI)
+        } catch (e) {
+            console.warn('Falha ao restaurar configuração de IA', e);
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            sincronizarUIComEstado();
+            try { restaurarUltimaSecao(); } catch (e) {}
+        }, { once: true });
+    } else {
+        sincronizarUIComEstado();
+        try { restaurarUltimaSecao(); } catch (e) {}
     }
 }
 
-function salvarDados() {
-    localStorage.setItem(STORAGE_DOCS, JSON.stringify(documentacoes));
-    localStorage.setItem(STORAGE_EXEMPLOS, JSON.stringify(exemplos));
-    localStorage.setItem(STORAGE_CATEGORIAS, JSON.stringify(categorias));
-    
-    aiConfig.apiKey = document.getElementById('aiApiKey')?.value || '';
-    aiConfig.model = document.getElementById('aiModel')?.value || document.querySelector('input[name="aiModel"]:checked')?.value || '';
-    localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+function autoRestoreAiSetup() {
+    try {
+        const restoredKey = restoreAiApiKey();
+        const aiKeyInput = document.getElementById('aiApiKey');
+        if (aiKeyInput) {
+            setAiKeyInputValue(aiKeyInput, aiConfig.apiKey || restoredKey || '', true);
+        }
+        if (aiConfig && typeof aiConfig === 'object') {
+            const storedCommands = getStoredAiCommandsSnapshot();
+            if (storedCommands && Object.keys(storedCommands).length) {
+                aiConfig.commands = storedCommands;
+            }
+        }
+        if (aiConfig && aiConfig.apiKey) {
+            if (aiAutoValidationTimer) clearTimeout(aiAutoValidationTimer);
+            aiAutoValidationTimer = setTimeout(() => {
+                try { validarApiKey({ silent: true }); } catch (e) {}
+            }, 500);
+        }
+    } catch (e) {}
+}
+
+function initializeAiAutoSetup() {
+    try {
+        const tryLoadConfigs = () => {
+            if (typeof window.carregarConfigsIA === 'function') {
+                window.carregarConfigsIA();
+                return true;
+            }
+            return false;
+        };
+
+        if (!tryLoadConfigs()) {
+            setTimeout(() => {
+                if (!tryLoadConfigs()) {
+                    setTimeout(() => tryLoadConfigs(), 250);
+                }
+            }, 100);
+        }
+
+        setTimeout(() => {
+            autoRestoreAiSetup();
+            if (!aiConfig.apiKey) {
+                setTimeout(() => autoRestoreAiSetup(), 700);
+            }
+        }, 300);
+    } catch (e) {}
+}
+
+async function salvarDados() {
+    const docs = Array.isArray(documentacoes) ? documentacoes : [];
+    const exs = Array.isArray(exemplos) ? exemplos : [];
+    const cats = Array.isArray(categorias) ? categorias : [];
+    const stateAi = aiConfig || { apiKey: '', model: '', provider: '' };
+
+    try {
+        localStorage.setItem(STORAGE_DOCS, JSON.stringify(docs));
+        localStorage.setItem(STORAGE_EXEMPLOS, JSON.stringify(exs));
+        localStorage.setItem(STORAGE_CATEGORIAS, JSON.stringify(cats));
+        saveStateBackup();
+    } catch (e) {}
+
+    try {
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'documents',
+                data: docs
+            })
+        });
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'examples',
+                data: exs
+            })
+        });
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'categories',
+                data: cats
+            })
+        });
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'chat',
+                data: getChatStorageData()
+            })
+        });
+        await fetch(apiUrl('/api/data'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                kind: 'ai',
+                data: stateAi
+            })
+        });
+    } catch (e) {
+        console.warn('Falha ao salvar estado no servidor', e);
+    }
 }
 
 function criarCategoriasDefault() {
@@ -638,6 +3393,67 @@ function getNomeCategoria(catId) {
     if (!catId) return '';
     const cat = categorias.find(c => String(c.id) === catId);
     return cat ? `${cat.icone} ${cat.nome}` : '📂 Sem categoria';
+}
+
+function getNomeCategoriaSemIcone(catId) {
+    if (catId === 'todos') return '';
+    const cat = categorias.find(c => String(c.id) === catId);
+    return cat ? String(cat.nome).trim() : '';
+}
+
+function stripCategoriaPrefixFromTitle(titulo, catId) {
+    if (!titulo || !String(titulo).trim()) return '';
+    let normalized = String(titulo).trim();
+
+    const categoryName = getNomeCategoriaSemIcone(catId);
+    if (categoryName) {
+        const prefix = `${categoryName} - `;
+        if (normalized.startsWith(prefix)) {
+            return normalized.slice(prefix.length).trim();
+        }
+    }
+
+    for (const cat of categorias) {
+        const name = String(cat.nome || '').trim();
+        if (!name) continue;
+        const prefix = `${name} - `;
+        if (normalized.startsWith(prefix)) {
+            return normalized.slice(prefix.length).trim();
+        }
+    }
+
+    const cleanupPrefixes = ['Documentação - ', 'Documentação: ', 'DOCUMENTAÇÃO - ', 'DOCUMENTAÇÃO: '];
+    for (const prefix of cleanupPrefixes) {
+        if (normalized.startsWith(prefix)) {
+            return normalized.slice(prefix.length).trim();
+        }
+    }
+
+    return normalized;
+}
+
+function buildDocTitleWithCategory(titulo, catId) {
+    const rawTitle = stripCategoriaPrefixFromTitle(titulo, catId);
+    const categoryName = getNomeCategoriaSemIcone(catId);
+    if (categoryName) {
+        return rawTitle ? `${categoryName} - ${rawTitle}` : `${categoryName} - `;
+    }
+    return rawTitle;
+}
+
+function refreshTitlePrefixForInput(titleInput, catId) {
+    if (!titleInput) return;
+    const currentRaw = stripCategoriaPrefixFromTitle(String(titleInput.value || ''), catId);
+    const newValue = buildDocTitleWithCategory(currentRaw, catId);
+    if (newValue !== titleInput.value) {
+        const cursorPos = titleInput.selectionStart || newValue.length;
+        titleInput.value = newValue;
+        const minPos = buildDocTitleWithCategory('', catId).length;
+        const newCursorPos = Math.max(cursorPos, minPos);
+        if (typeof titleInput.setSelectionRange === 'function') {
+            titleInput.setSelectionRange(newCursorPos, newCursorPos);
+        }
+    }
 }
 
 function getIconeCategoria(catId) {
@@ -718,12 +3534,12 @@ function inicializarEventos() {
             if (!cat) return;
 
                 document.getElementById('categoryName').value = cat.nome;
-                document.getElementById('categoryIcon').value = cat.icone;
+                const iconInput = document.getElementById('categoryIcon');
+                if (iconInput) iconInput.value = cat.icone && String(cat.icone).trim() ? String(cat.icone).trim() : '📂';
                 const col = document.getElementById('categoryColor'); if (col) col.value = cat.cor || '#6366f1';
                 document.getElementById('editingCategoryId').value = String(cat.id);
                 document.getElementById('categoryModalTitle').textContent = 'Editar Categoria';
                 document.getElementById('categorySubmitBtn').textContent = '💾 Salvar Alterações';
-                const palette = document.getElementById('iconPalette'); if (palette) palette.style.display = 'block';
                 setModalVisible('categoryModal', true);
             return;
         }
@@ -736,38 +3552,12 @@ function inicializarEventos() {
 
         if (e.target.closest('.category-item-delete')) {
             const catId = parseInt(e.target.closest('.category-item').dataset.categoryId);
-            const cat = categorias.find(c => c.id === catId);
-                if (confirm(`⚠️ ATENÇÃO: Deletar categoria "${cat.nome}"? Esta ação não pode ser desfeita!`) &&
-                confirm(`Tem CERTEZA? Documentos nessa categoria serão movidos para outra categoria (ou ficarão sem categoria).`)) {
-                categorias = categorias.filter(c => c.id !== catId);
-                documentacoes.forEach(d => {
-                    if (d.categoria === catId) d.categoria = categorias.length > 0 ? (categorias[0]?.id || 0) : 0;
-                });
-                salvarDados();
-                renderizarCategorias();
-                atualizarSelectsCategorias();
-                renderizarDocumentacoes();
-                atualizarStats();
-                alert('✅ Categoria deletada!');
-            }
+            promptDeleteCategory(catId);
         }
 
         if (e.target.closest('.delete-cat-btn')) {
             const catId = parseInt(e.target.closest('.delete-cat-btn').dataset.catId);
-            const cat = categorias.find(c => c.id === catId);
-            if (confirm(`⚠️ ATENÇÃO: Deletar categoria "${cat.nome}"? Esta ação não pode ser desfeita!`) &&
-                confirm(`Tem CERTEZA? Documentos nessa categoria serão movidos para outra categoria (ou ficarão sem categoria).`)) {
-                categorias = categorias.filter(c => c.id !== catId);
-                documentacoes.forEach(d => {
-                    if (d.categoria === catId) d.categoria = categorias.length > 0 ? (categorias[0]?.id || 0) : 0;
-                });
-                salvarDados();
-                renderizarCategorias();
-                atualizarSelectsCategorias();
-                renderizarDocumentacoes();
-                atualizarStats();
-                alert('✅ Categoria deletada!');
-            }
+            promptDeleteCategory(catId);
         }
 
         if (e.target.closest('.edit-cat-btn')) {
@@ -775,24 +3565,120 @@ function inicializarEventos() {
             const cat = categorias.find(c => c.id === catId);
             if (!cat) return;
             document.getElementById('categoryName').value = cat.nome;
-            document.getElementById('categoryIcon').value = cat.icone;
+            const iconInput = document.getElementById('categoryIcon');
+            if (iconInput) iconInput.value = cat.icone && String(cat.icone).trim() ? String(cat.icone).trim() : '📂';
             const col2 = document.getElementById('categoryColor'); if (col2) col2.value = cat.cor || '#6366f1';
             document.getElementById('editingCategoryId').value = String(cat.id);
             document.getElementById('categoryModalTitle').textContent = 'Editar Categoria';
             document.getElementById('categorySubmitBtn').textContent = '💾 Salvar Alterações';
-            const palette2 = document.getElementById('iconPalette'); if (palette2) palette2.style.display = 'block';
             setModalVisible('categoryModal', true);
         }
     });
+
+    function prepararNovaDocumentacao() {
+        currentEditingId = null;
+        currentEditingType = null;
+        const docForm = document.getElementById('docForm');
+        if (docForm) docForm.reset();
+
+        const title = document.getElementById('docTitle'); if (title) title.value = '';
+        const category = document.getElementById('docCategory'); if (category) category.value = '';
+        const description = document.getElementById('docDescription'); if (description) description.value = '';
+        const type = document.getElementById('docType'); if (type) type.value = 'normal';
+        const content = document.getElementById('docContent'); if (content) content.innerHTML = '';
+        const passo = document.getElementById('docPassoContent'); if (passo) passo.innerHTML = '';
+        const tags = document.getElementById('docTags'); if (tags) tags.value = '';
+        const docPassoGroup = document.getElementById('docPassoGroup');
+        const docContentGroup = document.getElementById('docContentGroup');
+        if (docPassoGroup) docPassoGroup.style.display = 'none';
+        if (docContentGroup) docContentGroup.style.display = 'block';
+        const fullscreenBackBtn = document.getElementById('fullscreenBackBtn'); if (fullscreenBackBtn) fullscreenBackBtn.style.display = 'none';
+        const fullscreenBackBtnPasso = document.getElementById('fullscreenBackBtnPasso'); if (fullscreenBackBtnPasso) fullscreenBackBtnPasso.style.display = 'none';
+
+        // reset chat scope for new create to avoid using old doc context
+        currentChatDocId = null;
+        setChatScope(null);
+        clearChatScopeBanner();
+
+        setTimeout(() => {
+            const titleInput = document.getElementById('docTitle');
+            if (titleInput) titleInput.focus();
+        }, 40);
+    }
+
+    function restaurarRascunhoAdicionar() {
+        try {
+            // priority: specific return payload set when user clicked salvar in chat (session first)
+            let rawDraft = null;
+            try { rawDraft = sessionStorage.getItem('dochub-chat-session-return-payload'); } catch(e) { rawDraft = null; }
+            if (rawDraft) {
+                try { sessionStorage.removeItem('dochub-chat-session-return-payload'); } catch(e) {}
+            }
+            if (!rawDraft) {
+                rawDraft = localStorage.getItem('dochub-chat-return-payload');
+                if (rawDraft) {
+                    try { localStorage.removeItem('dochub-chat-return-payload'); } catch(e) {}
+                }
+            }
+            // fallbacks
+            if (!rawDraft) rawDraft = localStorage.getItem(STORAGE_SIDEBAR_DRAFT) || localStorage.getItem('dochub-debug-last-saved-draft') || localStorage.getItem('dochub-chat-sidebar-draft-v2') || localStorage.getItem('dochub-chat-prefill');
+            if (!rawDraft) return;
+            let d = null;
+            try { d = JSON.parse(rawDraft); } catch(e) { d = { content: rawDraft }; }
+            // normalize prefill-like shapes
+            if (d && (d.content === undefined && d.passo === undefined && d.title === undefined) && typeof rawDraft === 'string') {
+                try {
+                    const maybePrefill = JSON.parse(rawDraft);
+                    if (maybePrefill) d = maybePrefill;
+                } catch(e) { /* keep existing d */ }
+            }
+            const contentEl = document.getElementById('docContent');
+            const passoEl = document.getElementById('docPassoContent');
+            const titleEl = document.getElementById('docTitle');
+            const descEl = document.getElementById('docDescription');
+            const tagsEl = document.getElementById('docTags');
+
+            if (typeof prepararNovaDocumentacao === 'function') prepararNovaDocumentacao();
+
+            if (titleEl && d.title) titleEl.value = d.title || '';
+            if (descEl && d.description) descEl.value = d.description || '';
+            if (tagsEl && d.tags) tagsEl.value = d.tags || '';
+            if (contentEl && d.content) contentEl.innerHTML = d.content || '';
+            if (passoEl && d.passo) passoEl.innerHTML = d.passo || '';
+            let resolvedType = d.type || 'normal';
+            if (!d.type) {
+                if (d.passo && (!d.content || d.content.toString().trim().length === 0)) {
+                    resolvedType = 'passo-a-passo';
+                }
+            }
+            if (document.getElementById('docType')) {
+                document.getElementById('docType').value = resolvedType;
+            }
+            if (resolvedType === 'passo-a-passo') {
+                const docPassoGroup = document.getElementById('docPassoGroup');
+                const docContentGroup = document.getElementById('docContentGroup');
+                if (docPassoGroup) docPassoGroup.style.display = 'block';
+                if (docContentGroup) docContentGroup.style.display = 'none';
+            } else {
+                const docPassoGroup = document.getElementById('docPassoGroup');
+                const docContentGroup = document.getElementById('docContentGroup');
+                if (docPassoGroup) docPassoGroup.style.display = 'none';
+                if (docContentGroup) docContentGroup.style.display = 'block';
+            }
+
+            // marcar como alterações não salvas (usuário precisa confirmar se sair sem salvar)
+            hasUnsavedChanges = true;
+        } catch (e) { /* ignore */ }
+    }
 
     const btnAddDoc = document.getElementById('quickAddDocBtn');
     if (btnAddDoc) {
         btnAddDoc.addEventListener('click', () => {
             mudarSecao('adicionar');
-            document.getElementById('docForm')?.reset();
-            setTimeout(() => document.getElementById('docTitle').focus(), 100);
+            prepararNovaDocumentacao();
         });
     }
+    // (removed small addBackBtn — navigation handled by previousSection and chat flow)
     const btnAddExemplo = document.getElementById('quickAddExemploBtn');
     if (btnAddExemplo) {
         btnAddExemplo.addEventListener('click', () => {
@@ -803,12 +3689,12 @@ function inicializarEventos() {
     const btnAddCategory = document.getElementById('addCategoryBtn');
     if (btnAddCategory) {
         btnAddCategory.addEventListener('click', () => {
-
             document.getElementById('categoryForm').reset();
+            const iconInput = document.getElementById('categoryIcon');
+            if (iconInput) iconInput.value = '📂';
             document.getElementById('editingCategoryId').value = '';
             document.getElementById('categoryModalTitle').textContent = 'Adicionar Categoria';
             document.getElementById('categorySubmitBtn').textContent = '➕ Criar Categoria';
-            const palette = document.getElementById('iconPalette'); if (palette) palette.style.display = 'none';
             setModalVisible('categoryModal', true);
         });
     }
@@ -816,18 +3702,18 @@ function inicializarEventos() {
     const btnAddCategorySettings = document.getElementById('addNewCategoryBtn');
     if (btnAddCategorySettings) {
         btnAddCategorySettings.addEventListener('click', () => {
-
-                const btnReorderCategories = document.getElementById('reorderCategoriesBtn');
-                if (btnReorderCategories) {
-                    btnReorderCategories.addEventListener('click', () => {
-                        iniciarModoReordenacaoSettings();
-                    });
-                }
+            const btnReorderCategories = document.getElementById('reorderCategoriesBtn');
+            if (btnReorderCategories) {
+                btnReorderCategories.addEventListener('click', () => {
+                    iniciarModoReordenacaoSettings();
+                });
+            }
             document.getElementById('categoryForm').reset();
+            const iconInput = document.getElementById('categoryIcon');
+            if (iconInput) iconInput.value = '📂';
             document.getElementById('editingCategoryId').value = '';
             document.getElementById('categoryModalTitle').textContent = 'Adicionar Categoria';
             document.getElementById('categorySubmitBtn').textContent = '➕ Criar Categoria';
-            const palette = document.getElementById('iconPalette'); if (palette) palette.style.display = 'none';
             setModalVisible('categoryModal', true);
         });
     }
@@ -856,6 +3742,7 @@ function inicializarEventos() {
     }
 
     inicializarRichEditor();
+    setupMentionAutocomplete();
 
     const docForm = document.getElementById('docForm');
     if (docForm) docForm.addEventListener('submit', adicionarDocumentacao);
@@ -873,7 +3760,7 @@ function inicializarEventos() {
     const sendEditToChatBtn = document.getElementById('sendEditToChatBtn');
     if (sendEditToChatBtn) {
         sendEditToChatBtn.addEventListener('click', () => {
-            const isPasso = currentEditVersion === 'passo-a-passo';
+            const isPasso = currentEditVersion === 'passo' || currentEditVersion === 'passo-a-passo';
             const editorId = isPasso ? 'editDocPassoContent' : 'editDocContent';
             sendEditorContentToChat(editorId, { isEdit: true, isPasso: isPasso, autoSend: true });
         });
@@ -905,6 +3792,18 @@ function inicializarEventos() {
 
     const editForm = document.getElementById('editForm');
     if (editForm) editForm.addEventListener('submit', salvarEdicao);
+
+    const docCategorySelect = document.getElementById('docCategory');
+    const docTitleInput = document.getElementById('docTitle');
+    if (docCategorySelect && docTitleInput) {
+        docCategorySelect.addEventListener('change', () => refreshTitlePrefixForInput(docTitleInput, docCategorySelect.value || 'todos'));
+    }
+
+    const editDocCategorySelect = document.getElementById('editDocCategory');
+    const editDocTitleInput = document.getElementById('editDocTitle');
+    if (editDocCategorySelect && editDocTitleInput) {
+        editDocCategorySelect.addEventListener('change', () => refreshTitlePrefixForInput(editDocTitleInput, editDocCategorySelect.value || 'todos'));
+    }
 
     const exemploForm = document.getElementById('exemploForm');
     if (exemploForm) exemploForm.addEventListener('submit', adicionarExemplo);
@@ -939,6 +3838,347 @@ function inicializarEventos() {
     }
 
     fecharModalsEventos();
+
+    function setupMentionAutocomplete() {
+        const mentionPopup = document.getElementById('mentionPopup');
+        const defaultMentionSuggestions = [
+            { value: '@lorem', label: 'Lorem Ipsum', description: 'Lorem padrão em parágrafo normal' },
+            { value: '@loremh1', label: 'Lorem H1', description: 'Lorem curto para título grande' },
+            { value: '@loremh2', label: 'Lorem H2', description: 'Lorem médio para subtítulo' }
+        ];
+        let activeMention = null;
+
+        function hideMentionPopup() {
+            if (!mentionPopup) return;
+            mentionPopup.classList.remove('visible');
+            mentionPopup.setAttribute('aria-hidden', 'true');
+            mentionPopup.innerHTML = '';
+            activeMention = null;
+        }
+
+        function getChatCommandSuggestions(query) {
+            const commands = getStoredAiCommandsSnapshot();
+            const items = Object.entries(commands)
+                .filter(([name]) => !activeChatCommandNames.includes(name.toLowerCase()))
+                .map(([name, prompt]) => ({
+                    value: `@${name}`,
+                    label: name,
+                    description: prompt ? prompt.substring(0, 80).trim() + (prompt.length > 80 ? '…' : '') : '',
+                    insertValue: `@${name}`
+                }));
+            if (!query) return items;
+            return items.filter(item => item.label.toLowerCase().startsWith(query.toLowerCase()));
+        }
+
+        function getMentionSuggestions(target, query) {
+            if (target.type === 'textarea' && target.element && target.element.id === 'chatInput') {
+                return getChatCommandSuggestions(query);
+            }
+            return defaultMentionSuggestions.filter(item => item.value.slice(1).toLowerCase().startsWith(query.toLowerCase()));
+        }
+
+        function buildMentionItems(query, target) {
+            if (!mentionPopup) return [];
+            const items = getMentionSuggestions(target, query);
+            if (!items.length) {
+                hideMentionPopup();
+                return [];
+            }
+            mentionPopup.innerHTML = '';
+            items.forEach((item, index) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'mention-item';
+                button.dataset.value = item.value;
+                button.dataset.index = String(index);
+                button.innerHTML = `<span class="mention-item-icon">@</span><strong>${item.label}</strong>`;
+                button.addEventListener('mousedown', (event) => {
+                    event.preventDefault();
+                    applyMentionSuggestion(item);
+                });
+                mentionPopup.appendChild(button);
+            });
+            setActiveMentionIndex(0);
+            return items;
+        }
+
+        function setActiveMentionIndex(index) {
+            if (!mentionPopup) return;
+            const items = Array.from(mentionPopup.querySelectorAll('.mention-item'));
+            if (!items.length) return;
+            const clamped = Math.max(0, Math.min(index, items.length - 1));
+            items.forEach((item, idx) => item.classList.toggle('active', idx === clamped));
+            if (!activeMention) return;
+            activeMention.selectedIndex = clamped;
+        }
+
+        function positionMentionPopup(rect) {
+            if (!mentionPopup || !rect) return;
+            const popupWidth = mentionPopup.offsetWidth || 240;
+            const popupHeight = mentionPopup.offsetHeight || 72;
+            let top = Math.min(window.innerHeight - popupHeight - 8, rect.top + rect.height + 6);
+            let left = Math.max(8, Math.min(window.innerWidth - popupWidth - 8, rect.left));
+            if (rect.top - popupHeight - 6 > 0) {
+                top = Math.max(8, rect.top - popupHeight - 6);
+            }
+            mentionPopup.style.position = 'fixed';
+            mentionPopup.style.top = `${top}px`;
+            mentionPopup.style.left = `${left}px`;
+        }
+
+        function showMentionPopup(target) {
+            if (!mentionPopup || !target) return;
+            const suggestions = buildMentionItems(target.query, target);
+            if (!suggestions.length) return;
+            positionMentionPopup(target.rect);
+            mentionPopup.classList.add('visible');
+            mentionPopup.setAttribute('aria-hidden', 'false');
+            activeMention = {
+                target,
+                selectedIndex: 0,
+                suggestions
+            };
+            setActiveMentionIndex(0);
+        }
+
+        function getMentionContextForTextarea(textarea) {
+            if (!textarea) return null;
+            const selectionStart = textarea.selectionStart;
+            if (selectionStart === null || selectionStart === undefined) return null;
+            const textBefore = textarea.value.slice(0, selectionStart);
+            const match = textBefore.match(/@([\p{L}\p{N}_-]*)$/u);
+            if (!match) return null;
+            const query = match[1];
+            const tokenStart = selectionStart - match[0].length;
+            const rect = textarea.getBoundingClientRect();
+            return { type: 'textarea', element: textarea, query, tokenStart, selectionStart, rect };
+        }
+
+        function getMentionContextForRichEditor(editor) {
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+            const focusNode = sel.focusNode;
+            const focusOffset = sel.focusOffset;
+            if (!focusNode) return null;
+
+            let textNode = focusNode;
+            let offset = focusOffset;
+            if (textNode.nodeType !== Node.TEXT_NODE) {
+                const findLastTextNode = (node) => {
+                    if (!node) return null;
+                    if (node.nodeType === Node.TEXT_NODE) return node;
+                    for (let i = node.childNodes.length - 1; i >= 0; i--) {
+                        const found = findLastTextNode(node.childNodes[i]);
+                        if (found) return found;
+                    }
+                    return null;
+                };
+
+                let candidate = null;
+                for (let i = offset - 1; i >= 0; i--) {
+                    const child = textNode.childNodes[i];
+                    const found = findLastTextNode(child);
+                    if (found) {
+                        candidate = found;
+                        break;
+                    }
+                }
+                textNode = candidate;
+                if (!textNode) return null;
+                offset = textNode.nodeValue ? textNode.nodeValue.length : 0;
+            }
+            if (!textNode || !textNode.nodeValue) return null;
+
+            const textBefore = textNode.nodeValue.slice(0, offset);
+            const match = textBefore.match(/@([\p{L}\p{N}_-]*)$/u);
+            if (!match) return null;
+            const tokenLength = match[0].length;
+            const tokenStart = offset - tokenLength;
+            const mentionRange = document.createRange();
+            mentionRange.setStart(textNode, tokenStart);
+            mentionRange.setEnd(textNode, offset);
+            const rect = mentionRange.getBoundingClientRect() || mentionRange.getClientRects()[0];
+            return { type: 'rich-editor', element: editor, query: match[1], range: mentionRange, rect };
+        }
+
+        function applyMentionSuggestion(suggestion) {
+            if (!activeMention || !suggestion) return;
+            const replacement = suggestion.insertValue || suggestion.value || '';
+            if (activeMention.target.type === 'textarea') {
+                const ta = activeMention.target.element;
+                const before = ta.value.slice(0, activeMention.target.tokenStart);
+                const after = ta.value.slice(activeMention.target.selectionStart);
+                ta.value = (before + after).replace(/\s+/g, ' ').trimStart();
+                const cursorPos = before.length;
+                ta.setSelectionRange(cursorPos, cursorPos);
+                ta.focus();
+                if (ta.id === 'chatInput') {
+                    const commandName = replacement.replace(/^@/, '').trim().toLowerCase();
+                    if (commandName) {
+                        addActiveChatCommands([commandName]);
+                        chatMentionSelectionBlockedSend = true;
+                    }
+                }
+            } else if (activeMention.target.type === 'rich-editor') {
+                const range = activeMention.target.range;
+                const fragmentData = createMentionFragmentForEditor(replacement, suggestion.value);
+                const headingAncestor = findHeadingAncestor(range.startContainer, activeMention.target.element);
+                range.deleteContents();
+                if (headingAncestor) {
+                    const insertRange = document.createRange();
+                    insertRange.setStartAfter(headingAncestor);
+                    insertRange.collapse(true);
+                    insertRange.insertNode(fragmentData.fragment);
+                } else {
+                    range.insertNode(fragmentData.fragment);
+                }
+                const sel = window.getSelection();
+                if (sel) {
+                    sel.removeAllRanges();
+                    const newRange = document.createRange();
+                    newRange.setStartAfter(fragmentData.spaceNode);
+                    newRange.collapse(true);
+                    sel.addRange(newRange);
+                }
+                activeMention.target.element.focus();
+            }
+            hideMentionPopup();
+        }
+
+        function createMentionFragmentForEditor(replacement, suggestionValue) {
+            const fragment = document.createDocumentFragment();
+            let node;
+            if (suggestionValue === '@loremh1' || suggestionValue === '@loremh2') {
+                const span = document.createElement('span');
+                span.style.display = 'inline';
+                span.style.lineHeight = '1.2';
+                span.style.whiteSpace = 'pre-wrap';
+                if (suggestionValue === '@loremh1') {
+                    span.style.fontSize = '24px';
+                    span.style.fontWeight = '700';
+                } else {
+                    span.style.fontSize = '20px';
+                    span.style.fontWeight = '600';
+                }
+                span.textContent = replacement;
+                node = span;
+            } else {
+                node = document.createTextNode(replacement);
+            }
+            fragment.appendChild(node);
+            const spaceNode = document.createTextNode(' ');
+            fragment.appendChild(spaceNode);
+            return { fragment, spaceNode };
+        }
+
+        function generateLoremTextForSuggestion(value) {
+            if (value === '@loremh1') {
+                return generateRandomWords(5, 8, false);
+            }
+            if (value === '@loremh2') {
+                return generateRandomWords(7, 12, false);
+            }
+            if (value === '@lorem') {
+                return generateRandomWords(18, 28, true);
+            }
+            return generateRandomWords(18, 28, true);
+        }
+
+        function generateRandomWords(minWords, maxWords, usePeriod = true) {
+            const words = ['eiusmod', 'enim', 'ad', 'aliqua', 'magna', 'amet', 'aliquip', 'ut', 'tempor', 'exercitation', 'laboris', 'minim', 'dolor', 'sit', 'amet', 'consequat', 'nisi', 'veniam', 'eu', 'occaecat', 'culpa', 'quis', 'sint', 'deserunt'];
+            const count = Math.floor(Math.random() * (maxWords - minWords + 1)) + minWords;
+            const selected = [];
+            for (let i = 0; i < count; i++) {
+                selected.push(words[Math.floor(Math.random() * words.length)]);
+            }
+            let text = selected.join(' ');
+            text = text.charAt(0).toUpperCase() + text.slice(1);
+            if (usePeriod && !text.endsWith('.')) {
+                text += '.';
+            }
+            return text;
+        }
+
+        function handleMentionTargetInput(event) {
+            const target = event.currentTarget;
+            let context = null;
+            if (target.tagName === 'TEXTAREA') {
+                context = getMentionContextForTextarea(target);
+            } else {
+                context = getMentionContextForRichEditor(target);
+            }
+            if (!context || context.query === null) {
+                hideMentionPopup();
+                return;
+            }
+            
+            // Se já há um @ ativo no chatInput, não mostrar popup de comandos
+            if (target.id === 'chatInput' && activeChatCommandNames && activeChatCommandNames.length > 0) {
+                hideMentionPopup();
+                return;
+            }
+            
+            context.rect = context.rect || target.getBoundingClientRect();
+            activeMention = { target: context, selectedIndex: 0, suggestions: [] };
+            showMentionPopup(context);
+        }
+
+        function handleMentionTargetKeydown(event) {
+            if (!activeMention || !mentionPopup.classList.contains('visible')) return;
+            const key = event.key;
+            const items = Array.from(mentionPopup.querySelectorAll('.mention-item'));
+            if (!items.length) return;
+            if (key === 'ArrowDown') {
+                event.preventDefault();
+                activeMention.selectedIndex = Math.min(activeMention.selectedIndex + 1, items.length - 1);
+                setActiveMentionIndex(activeMention.selectedIndex);
+                return;
+            }
+            if (key === 'ArrowUp') {
+                event.preventDefault();
+                activeMention.selectedIndex = Math.max(activeMention.selectedIndex - 1, 0);
+                setActiveMentionIndex(activeMention.selectedIndex);
+                return;
+            }
+            if (key === 'Enter' || key === 'Tab') {
+                event.preventDefault();
+                const suggestion = activeMention.suggestions[activeMention.selectedIndex];
+                if (suggestion) applyMentionSuggestion(suggestion);
+                return;
+            }
+            if (key === 'Escape') {
+                event.preventDefault();
+                hideMentionPopup();
+                return;
+            }
+        }
+
+        function isMentionTargetElement(element) {
+            if (!element) return false;
+            return !!element.closest('.rich-editor');
+        }
+
+        document.querySelectorAll('.rich-editor').forEach(editor => {
+            editor.addEventListener('input', handleMentionTargetInput);
+            editor.addEventListener('keyup', handleMentionTargetInput);
+            editor.addEventListener('keydown', handleMentionTargetKeydown);
+        });
+
+        // não mais monitoramos o campo `aiSystemPrompt` aqui (removido da UI)
+
+        const chatInputEl = document.getElementById('chatInput');
+        if (chatInputEl) {
+            chatInputEl.addEventListener('input', handleMentionTargetInput);
+            chatInputEl.addEventListener('keyup', handleMentionTargetInput);
+            chatInputEl.addEventListener('keydown', handleMentionTargetKeydown);
+        }
+
+        document.addEventListener('mousedown', (event) => {
+            if (!mentionPopup) return;
+            if (mentionPopup.contains(event.target)) return;
+            hideMentionPopup();
+        });
+    }
 
     // Dark mode: default to dark when no preference stored
     const darkToggle = document.getElementById('darkMode');
@@ -986,9 +4226,12 @@ function inicializarEventos() {
     const aiSettingsModal = document.getElementById('aiSettingsModal');
     const closeAiSettings = document.querySelector('.close-ai-settings');
 
+    initializeAiKeyInputs();
+
     if (aiSettingsBtn && aiSettingsModal) {
         aiSettingsBtn.addEventListener('click', () => {
             setModalVisible('aiSettingsModal', true);
+            setActiveAiTab('api');
             carregarConfigsIA();
         });
     }
@@ -998,6 +4241,7 @@ function inicializarEventos() {
     if (chatSettingsBtn && aiSettingsModal) {
         chatSettingsBtn.addEventListener('click', () => {
             setModalVisible('aiSettingsModal', true);
+            setActiveAiTab('api');
             carregarConfigsIA();
         });
     }
@@ -1029,16 +4273,23 @@ function inicializarEventos() {
     });
 
     // Botões de salvar das abas
-    document.getElementById('saveSystemPromptBtn')?.addEventListener('click', salvarSystemPrompt);
-    document.getElementById('resetSystemPromptBtn')?.addEventListener('click', restaurarSystemPromptPadrao);
     document.getElementById('saveApiSettingsBtn')?.addEventListener('click', salvarConfigsIA);
-    document.getElementById('validateApiKeyBtn')?.addEventListener('click', validarApiKey);
+    document.getElementById('validateApiKeyBtn')?.addEventListener('click', () => validarApiKey({ silent: false }));
     document.getElementById('runConnectionTestBtn')?.addEventListener('click', testarConexaoIA);
 
-    // Toggle visibilidade da API Key
+    // Auto-save dos prompts em tempo real (com debounce)
+    const sumSysPromptEl = document.getElementById('aiSummarySystemPrompt');
+    if (sumSysPromptEl) {
+        sumSysPromptEl.addEventListener('input', debounce(() => {
+            autoSaveAISettings();
+        }, 500));
+    }
+
+    // Auto-save dos toggles de visibilidade
+
+    // Toggle visibilidade da API Key sem usar password
     const toggleAiKeyBtn = document.getElementById('toggleAiKeyBtn');
     if (toggleAiKeyBtn) {
-        // SVGs para olhos (open / closed)
         const eyeOpen = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">'
             + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>'
             + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>'
@@ -1049,17 +4300,18 @@ function inicializarEventos() {
             + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.12 14.12C12.98 15.26 11.03 15.26 9.89 14.12"/>'
             + '</svg>';
 
-        toggleAiKeyBtn.addEventListener('click', (e) => {
+        toggleAiKeyBtn.addEventListener('click', () => {
             const input = document.getElementById('aiApiKey');
             if (!input) return;
-            if (input.type === 'password') {
-                input.type = 'text';
-                toggleAiKeyBtn.innerHTML = eyeClosed;
-                toggleAiKeyBtn.title = 'Ocultar chave';
-            } else {
-                input.type = 'password';
+            const reveal = input.dataset.reveal === 'true';
+            if (reveal) {
+                setAiKeyInputValue(input, input.dataset.rawValue || '', false);
                 toggleAiKeyBtn.innerHTML = eyeOpen;
                 toggleAiKeyBtn.title = 'Mostrar chave';
+            } else {
+                setAiKeyInputValue(input, input.dataset.rawValue || '', true);
+                toggleAiKeyBtn.innerHTML = eyeClosed;
+                toggleAiKeyBtn.title = 'Ocultar chave';
             }
         });
     }
@@ -1068,6 +4320,8 @@ function inicializarEventos() {
 
     // Botão de limpar chat
     document.getElementById('clearChatBtn')?.addEventListener('click', limparChat);
+    // botão de limpar no topo (navbar)
+    document.getElementById('clearChatTopBtn')?.addEventListener('click', limparChat);
 
     // Salvar configurações de IA
     document.getElementById('saveAiSettingsBtn')?.addEventListener('click', () => {
@@ -1121,16 +4375,64 @@ function inicializarEventos() {
     }
 
     // Carregar configurações de IA para o modal exclusivo
-    function carregarConfigsIA() {
+    window.carregarConfigsIA = function carregarConfigsIA() {
         try {
-            const ai = localStorage.getItem(STORAGE_AI);
-            if (ai) aiConfig = JSON.parse(ai);
+            const ai = readPersistedAiConfig();
+            if (ai) {
+                const restoredKey = restoreAiApiKey();
+                aiConfig = {
+                    ...sanitizeAiConfigForStorage(ai || {}),
+                    apiKey: aiConfig.apiKey || restoredKey || ''
+                };
+                persistAiConfig(aiConfig);
+            }
         } catch(e){}
-        
-        document.getElementById('aiApiKey').value = aiConfig.apiKey || '';
-        document.getElementById('aiModel').value = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
-        document.getElementById('aiSystemPrompt').value = aiConfig.systemPrompt || 'Você é um assistente de IA útil, preciso e respeitoso. Responda em português. Seja conciso mas informativo.';
-        document.getElementById('aiMaxTokens').value = aiConfig.maxTokens || 2000;
+        aiConfig = aiConfig || { apiKey: '', model: '', provider: '' };
+        aiConfig.commands = aiConfig.commands || {};
+        const aiKeyInput = document.getElementById('aiApiKey');
+        if (aiKeyInput) {
+            configureAiKeyInput(aiKeyInput);
+            const restoredKey = restoreAiApiKey();
+            setAiKeyInputValue(aiKeyInput, aiConfig.apiKey || restoredKey || '', true);
+            const btn = document.getElementById('validateApiKeyBtn');
+            const badge = document.getElementById('apiKeyStatusBadge');
+            if (getAiKeyInputValue(aiKeyInput)) {
+                if (btn) btn.style.display = 'none';
+                if (badge) {
+                    badge.textContent = '⏳ Verificando chave salva...';
+                    badge.style.display = 'block';
+                    badge.classList.remove('valid');
+                }
+                if (aiAutoValidationTimer) clearTimeout(aiAutoValidationTimer);
+                aiAutoValidationTimer = setTimeout(() => validarApiKey({ silent: true }), 250);
+            } else if (btn) {
+                btn.style.display = '';
+                if (badge) badge.style.display = 'none';
+            }
+        }
+        const selectedModel = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        const selectedRadio = document.querySelector(`input[name="aiModel"][value="${selectedModel}"]`);
+        if (selectedRadio) selectedRadio.checked = true;
+        const aiSummaryEl = document.getElementById('aiSummarySystemPrompt');
+        if (aiSummaryEl) aiSummaryEl.value = aiConfig.summarySystemPrompt || `Você é um assistente especializado em estruturar procedimentos em passos claros.
+
+Formato obrigatório:
+
+### Título da Seção
+
+- Passo 1: descrição breve
+- Passo 2: descrição breve
+- Passo 3: descrição breve
+
+### Outra Seção (se houver)
+
+- Ação 1
+- Ação 2
+
+Responda sempre em português.
+Use títulos (###) para separar seções principais.
+Use bullet points (-) para listar ações dentro de cada seção.
+Seja conciso mas informativo.`;
         
         // Selecionar modelo
         const modelRadios = document.querySelectorAll('input[name="aiModel"]');
@@ -1140,13 +4442,41 @@ function inicializarEventos() {
                 radio.checked = true;
             }
         });
-    }
+    
+        if (![...modelRadios].some(r => r.checked)) modelRadios[0].checked = true;
+
+        // Garantir que o Summary System Prompt salvo apareça na UI imediatamente
+        const sumSysEl = document.getElementById('aiSummarySystemPrompt');
+        if (sumSysEl) sumSysEl.value = aiConfig.summarySystemPrompt || `Você é um assistente especializado em estruturar procedimentos em passos claros.
+
+Formato obrigatório:
+
+### Título da Seção
+
+- Passo 1: descrição breve
+- Passo 2: descrição breve
+- Passo 3: descrição breve
+
+### Outra Seção (se houver)
+
+- Ação 1
+- Ação 2
+
+Responda sempre em português.
+Use títulos (###) para separar seções principais.
+Use bullet points (-) para listar ações dentro de cada seção.
+Seja conciso mas informativo.`;
+
+        try { renderAiCommandsUI(); } catch (e) { console.warn('renderAiCommandsUI failed', e); }
+        document.getElementById('addAiCommandBtn')?.addEventListener('click', () => addAiCommandRow('', ''));
+    };
 
     // Função de label de temperatura removida (controle de temperatura foi retirado da UI)
 
     // Validar API Key
-    function validarApiKey() {
-        const apiKey = document.getElementById('aiApiKey').value.trim();
+    function validarApiKey(options = {}) {
+        const { silent = false } = options;
+        const apiKey = getAiKeyInputValue(document.getElementById('aiApiKey'));
         const badge = document.getElementById('apiKeyStatusBadge');
         const btn = document.getElementById('validateApiKeyBtn');
 
@@ -1154,53 +4484,88 @@ function inicializarEventos() {
             badge.classList.remove('valid');
             badge.textContent = '❌ API Key não foi preenchida';
             badge.style.display = 'block';
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔍 Validar Chave';
+                btn.style.display = '';
+            }
             return;
         }
 
-        btn.disabled = true;
-        btn.textContent = '⏳ Validando...';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ Validando...';
+            btn.style.display = silent ? 'none' : '';
+        }
 
         // Detect provider: respeitar aiConfig.provider ou inferir pelo modelo selecionado
         const selectedModel = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
         let provider = aiConfig.provider || '';
         if (!provider) {
-            const name = (selectedModel || '').toLowerCase();
-            if (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) provider = 'genai';
-            else provider = 'openai';
+            provider = detectProviderFromApiKey(apiKey, selectedModel, aiConfig.provider || '');
         }
-        const modelForTest = selectedModel || (provider === 'genai' ? 'gemma-3-27b-it' : 'gpt-3.5-turbo');
+        const modelForTest = normalizeAiModel(selectedModel, provider);
 
         // Fazer requisição ao backend para validar (rota /validate)
-        fetch('http://localhost:5000/validate', {
+        fetch(apiUrl('/api/validate'), {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ api_key: apiKey, model: modelForTest, provider: provider })
         })
-        .then(res => res.json())
-        .then(data => {
-            if (data.valid) {
+        .then(async (res) => {
+            let payload = null;
+            try {
+                payload = await res.json();
+            } catch (e) {
+                payload = null;
+            }
+
+            if (!res.ok) {
+                const detail = payload?.error || payload?.detail || 'Falha na validação';
+                badge.classList.remove('valid');
+                badge.textContent = `⚠️ Servidor de IA indisponível: ${detail}`;
+                badge.style.display = 'block';
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🔍 Validar Chave';
+                    btn.style.display = silent ? 'none' : '';
+                }
+                return;
+            }
+
+            if (payload?.valid) {
                 badge.classList.add('valid');
                 badge.textContent = '✅ API Key válida! Pronta para usar.';
             } else {
                 badge.classList.remove('valid');
-                badge.textContent = '❌ API Key inválida ou expirada: ' + (data.error || 'verifique a chave');
+                badge.textContent = '❌ API Key inválida ou expirada: ' + (payload?.error || 'verifique a chave');
             }
             badge.style.display = 'block';
-            btn.disabled = false;
-            btn.textContent = '🔍 Validar Chave';
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔍 Validar Chave';
+                btn.style.display = silent ? 'none' : '';
+            }
         })
         .catch(err => {
             badge.classList.remove('valid');
-            badge.textContent = '❌ Erro ao validar: ' + err.message;
+            const message = /fetch|network|Failed to fetch|load failed/i.test(err?.message || '')
+                ? '⚠️ Servidor de IA indisponível ou inacessível.'
+                : '❌ Erro ao validar: ' + err.message;
+            badge.textContent = message;
             badge.style.display = 'block';
-            btn.disabled = false;
-            btn.textContent = '🔍 Validar Chave';
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔍 Validar Chave';
+                btn.style.display = silent ? 'none' : '';
+            }
         });
     }
 
     // Verificar se servidor está online
     function verificarServerOnline(tentativas = 0) {
-        return fetch('http://localhost:5000/health', { method: 'GET' })
+        return fetch(apiUrl('/api/health'), { method: 'GET' })
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'online') {
@@ -1225,7 +4590,7 @@ function inicializarEventos() {
         let providerFuncional = null;
 
         function testarModelo(modelo, prov) {
-            return fetch('http://localhost:5000/validate', {
+            return fetch(apiUrl('/api/validate'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: apiKey, model: modelo, provider: prov })
@@ -1243,12 +4608,20 @@ function inicializarEventos() {
         (async () => {
             const selected = aiConfig.model || document.querySelector('input[name="aiModel"]:checked')?.value || '';
 
-            const providersToTry = provider ? [provider] : ['openai', 'genai'];
+            const providerCandidates = [];
+            if (provider) providerCandidates.push(provider);
+            const inferredProvider = detectProviderFromApiKey(apiKey, selected, aiConfig.provider || '');
+            if (!providerCandidates.includes(inferredProvider)) providerCandidates.push(inferredProvider);
+            if (!providerCandidates.includes('openai')) providerCandidates.push('openai');
+            if (!providerCandidates.includes('genai')) providerCandidates.push('genai');
+            if (!providerCandidates.includes('anthropic')) providerCandidates.push('anthropic');
+
+            const providersToTry = providerCandidates.filter(Boolean);
 
             for (const prov of providersToTry) {
                 let modelos = [];
-                if (selected) modelos = [selected];
-                else if (prov === 'genai') modelos = ['gemma-3-27b-it', 'gemma-3-12b', 'gemini-1.5'];
+                if (selected) modelos = [normalizeAiModel(selected, prov)];
+                else if (prov === 'genai') modelos = [DEFAULT_GENAI_MODEL, 'gemini-1.5-pro'];
                 else modelos = ['gpt-4', 'gpt-3.5-turbo'];
 
                 for (const modelo of modelos) {
@@ -1274,13 +4647,15 @@ function inicializarEventos() {
                 `;
 
                 results.style.display = 'block';
-                document.getElementById('aiApiKey').value = apiKey;
+                setAiKeyInputValue(document.getElementById('aiApiKey'), apiKey, false);
                 const radio = document.querySelector(`input[name="aiModel"][value="${modeloFuncional}"]`);
                 if (radio) radio.checked = true;
-                aiConfig.apiKey = apiKey;
+                aiConfig.apiKey = '';
                 aiConfig.model = modeloFuncional;
                 aiConfig.provider = providerFuncional;
-                localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
+                const safeConfig = sanitizeAiConfigForStorage(aiConfig);
+                safeConfig.apiKey = undefined;
+                localStorage.setItem(STORAGE_AI, JSON.stringify(safeConfig));
 
                 showToast(`✅ Configurado! Provider: ${providerFuncional}`, 'success');
             } else {
@@ -1299,7 +4674,7 @@ function inicializarEventos() {
         })();
     }
     function testarConexaoIA() {
-        const apiKey = document.getElementById('testApiKey').value.trim();
+        const apiKey = getAiKeyInputValue(document.getElementById('testApiKey'));
         const status = document.getElementById('testConnectionStatus');
         const results = document.getElementById('testResults');
         const btn = document.getElementById('runConnectionTestBtn');
@@ -1379,81 +4754,130 @@ function inicializarEventos() {
 
     // Salvar configurações de IA
     function salvarConfigsIA() {
-        const apiKey = document.getElementById('aiApiKey').value.trim();
-        const model = document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        const apiKey = getAiKeyInputValue(document.getElementById('aiApiKey'));
+        const rawModel = document.querySelector('input[name="aiModel"]:checked')?.value || '';
+        const model = normalizeAiModel(rawModel, inferProviderFromModel(rawModel));
 
         if (!apiKey) {
             showToast('❌ Preencha a chave de API', 'error');
             return;
         }
 
-        // Ler também system prompt e max tokens
-        const systemPrompt = document.getElementById('aiSystemPrompt')?.value || '';
-        const maxTokens = parseInt(document.getElementById('aiMaxTokens')?.value) || 2000;
+        // Ler apenas resumo (passo a passo) e demais configs
+        const summarySystemPrompt = document.getElementById('aiSummarySystemPrompt')?.value || '';
 
+        if (!aiConfig || typeof aiConfig !== 'object') aiConfig = {};
         aiConfig.apiKey = apiKey;
         aiConfig.model = model;
-        aiConfig.systemPrompt = systemPrompt;
-        aiConfig.maxTokens = maxTokens;
+        aiConfig.summarySystemPrompt = summarySystemPrompt;
+        aiConfig.commands = collectAiCommandsFromUI();
+        // ler toggles de visibilidade (salvar também quando salvar configs)
 
         // Incluir provider inferido
         let provider = aiConfig.provider || '';
         if (!provider) {
-            const name = (model || '').toLowerCase();
-            provider = (name.includes('gem') || name.includes('gemma') || name.includes('gemini')) ? 'genai' : 'openai';
+            provider = detectProviderFromApiKey(apiKey, model, aiConfig.provider || '');
             aiConfig.provider = provider;
         }
 
-        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
-        showToast('✅ Configurações de API salvas!', 'success');
-
-        // Fechar modal de configurações de IA
-        setModalVisible('aiSettingsModal', false);
-
-        // Ir direto para o Chat e focar o input
-        mudarSecao('chat');
-        setTimeout(() => {
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput) {
-                chatInput.focus();
+        try {
+            persistAiConfig(aiConfig);
+            showToast('✅ Configurações de API salvas!', 'success');
+            // Persistir no backend, não no navegador.
+            try {
+                const payload = {
+                    api_key: apiKey,
+                    model,
+                    provider,
+                    summary_system_prompt: summarySystemPrompt,
+                    commands: aiConfig.commands || {}
+                };
+                fetch(apiUrl('/api/data'), {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kind: 'ai', data: payload })
+                }).catch(e => console.warn('Erro ao persistir IA no backend', e));
+                fetch(apiUrl('/api/set_summary_system_prompt'), {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey, summary_system_prompt: summarySystemPrompt, model, provider, commands: aiConfig.commands || {} })
+                }).then(res => res.json()).then(r => {
+                    if (!r || !r.success) console.warn('Não foi possível persistir IA no backend', r);
+                }).catch(e => console.warn('Erro ao persistir IA no backend', e));
+            } catch (e) {
+                console.warn('Erro fetch set_summary_system_prompt', e);
             }
-        }, 150);
-    }
-
-    // Salvar System Prompt
-    function salvarSystemPrompt() {
-        const systemPrompt = document.getElementById('aiSystemPrompt').value.trim();
-        const maxTokens = parseInt(document.getElementById('aiMaxTokens').value) || 2000;
-
-        if (!systemPrompt) {
-            showToast('❌ System Prompt não pode estar vazio', 'error');
+        } catch (e) {
+            console.error('[ERROR] salvarConfigsIA -> localStorage setItem failed', e);
+            showToast('❌ Falha ao salvar configurações de IA', 'error');
             return;
         }
 
-        aiConfig.systemPrompt = systemPrompt;
-        aiConfig.maxTokens = maxTokens;
+            // Marcar que o modal foi salvo, para que o fechamento não reverta alterações
+        aiSettingsSaved = true;
+        // Fechar modal de configurações de IA
+        setModalVisible('aiSettingsModal', false);
 
-        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
-        showToast('✅ System Prompt salvo (será aplicado como instrução obrigatória)', 'success');
+        // Salvar o estado do chat e abrir de forma estável
+        try {
+            localStorage.setItem('dochub-chat-open-empty', 'false');
+            localStorage.removeItem('dochub-chat-prefill');
+            localStorage.setItem('dochub-chat-last-action', 'ai-settings-saved');
+        } catch (e) {}
+
+        // Se estamos na página do chat, apenas reprocessar a UI sem redirecionar.
+        if (window.location.pathname.toLowerCase().endsWith('chat.html')) {
+            try {
+                if (typeof restoreChatScopeFromStorage === 'function') restoreChatScopeFromStorage();
+                if (typeof loadChatHistory === 'function') loadChatHistory();
+                const chatInput = document.getElementById('chatInput');
+                if (chatInput) {
+                    setTimeout(() => {
+                        chatInput.focus();
+                        chatInput.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                    }, 80);
+                }
+            } catch (e) {
+                console.warn('Erro ao reabrir chat após salvar configurações', e);
+            }
+            return;
+        }
+
+        openChat();
     }
 
-    // Restaurar System Prompt padrão
-    function restaurarSystemPromptPadrao() {
-        const padrao = 'Você é um assistente de IA útil, preciso e respeitoso. Responda em português. Seja conciso mas informativo.';
-        document.getElementById('aiSystemPrompt').value = padrao;
-        aiConfig.systemPrompt = padrao;
-        localStorage.setItem(STORAGE_AI, JSON.stringify(aiConfig));
-        showToast('✅ System Prompt restaurado ao padrão', 'success');
-    }
+    // System Prompt removido da UI — funções de salvar/restaurar foram removidas.
 
     // Limpar chat
     function limparChat() {
-        if (confirm('Tem certeza que deseja limpar todo o histórico do chat?')) {
+        if (confirm('Tem certeza que deseja limpar o histórico do chat atual?')) {
+            try {
+                const storage = getChatStorageData();
+                const key = getChatScopeKey(currentChatDocId);
+                if (key === 'global') {
+                    storage.global = [];
+                } else {
+                    if (storage.docs && typeof storage.docs === 'object') {
+                        delete storage.docs[key];
+                    }
+                }
+                setChatStorageData(storage);
+            } catch (e) {
+                console.warn('Erro ao limpar chat', e);
+            }
             const chatMessages = document.getElementById('chatMessages');
             if (chatMessages) {
-                chatMessages.innerHTML = '<div class="chat-message bot"><div class="message-content"><p>Olá! 👋 Sou seu assistente de IA. Como posso ajudá-lo?</p></div></div>';
+                chatMessages.innerHTML = '<div class="chat-message bot"><div class="message-content"><p>Olá! 👋 Sou seu assistente de IA. Faça perguntas sobre suas documentações.</p></div></div>';
+                chatMessages.scrollTop = chatMessages.scrollHeight;
             }
-            showToast('✅ Chat limpo', 'success');
+            // notificar usuário
+            if (currentChatDocId) {
+                showToast('✅ Histórico do chat desta documentação removido', 'success');
+            } else {
+                showToast('✅ Histórico do chat global removido', 'success');
+            }
         }
     }
 
@@ -1522,6 +4946,9 @@ function inicializarEventos() {
 let reorderingMode = false;
 let reorderingDocsMode = false;
 let draggedElement = null;
+// Chat mode/intent (session)
+let currentChatMode = 'normal'; // 'normal' or 'passo'
+let currentChatIntent = 'tirar-duvidas';
 
 function iniciarModoReordenacao() {
     reorderingMode = true;
@@ -1698,8 +5125,6 @@ function iniciarModoReordenacaoDocs() {
             card.classList.add('reordering-mode');
             card.draggable = true;
             card.style.cursor = 'move';
-            card.style.border = '2px solid #6366f1';
-            card.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
         });
 
         docsContainer.querySelectorAll('.doc-card.reordering-mode').forEach(card => {
@@ -1723,15 +5148,12 @@ function iniciarModoReordenacaoDocs() {
         const allItems = categoriesContainer.querySelectorAll('.category-item');
         allItems.forEach((item, idx) => {
             item.classList.add('reordering-mode');
-            item.style.border = '2px solid #6366f1';
             
             if (idx === 0) {
-                item.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
                 item.draggable = false;
                 item.style.cursor = 'pointer'; // Permite clique para acessar
                 // Remover opacity para permitir interação visual normal
             } else {
-                item.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
                 item.draggable = true;
                 item.style.cursor = 'move';
                 item.style.opacity = '1';
@@ -1988,15 +5410,7 @@ function cancelarReordenacaoCompleta() {
         '.section-header h2'
     ];
     
-    elementosParaReabilitar.forEach(seletor => {
-        const elementos = document.querySelectorAll(seletor);
-        elementos.forEach(el => {
-            el.classList.remove('disabled-reorder');
-            el.style.pointerEvents = '';
-            el.style.opacity = '';
-            el.style.filter = '';
-        });
-    });
+    restaurarEstadoInterfaceReordenacao();
     
     // Restaurar event listeners dos cards de documentação
     const docCards = document.querySelectorAll('.doc-card');
@@ -2143,62 +5557,7 @@ function bloquearInterfaceReordenacaoDocs(bloquear) {
         overlay.style.display = 'flex';
         
     } else {
-
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.style.pointerEvents = '';
-            link.style.opacity = '';
-            link.style.filter = '';
-        });
-
-        document.querySelectorAll('.btn-primary, .btn-secondary').forEach(btn => {
-            btn.style.pointerEvents = '';
-            btn.style.opacity = '';
-            btn.style.filter = '';
-        });
-
-        const elementosEspecificos = [
-            '.search-btn', '#reorderDocsBtn', '.view-btn'
-        ];
-        
-        elementosEspecificos.forEach(seletor => {
-            document.querySelectorAll(seletor).forEach(elemento => {
-                elemento.style.pointerEvents = '';
-                elemento.style.opacity = '';
-                elemento.style.filter = '';
-            });
-        });
-
-        const botoesCategoriaCRUD = [
-            '#addCategoryBtn',
-            '.category-item-edit',
-            '.category-item-delete'
-        ];
-        
-        botoesCategoriaCRUD.forEach(seletor => {
-            document.querySelectorAll(seletor).forEach(elemento => {
-                elemento.style.pointerEvents = '';
-                elemento.style.opacity = '';
-                elemento.style.filter = '';
-            });
-        });
-
-        document.querySelectorAll('.doc-card').forEach(card => {
-            card.style.pointerEvents = '';
-            card.style.opacity = '';
-            card.style.filter = '';
-        });
-
-        document.querySelectorAll('input, textarea, select').forEach(input => {
-            input.style.pointerEvents = '';
-            input.style.opacity = '';
-        });
-
-        // Reabilitar títulos
-        document.querySelectorAll('.sidebar-title, .navbar-title, .logo-icon').forEach(el => {
-            el.style.pointerEvents = '';
-            el.style.opacity = '';
-            el.style.filter = '';
-        });
+        restaurarEstadoInterfaceReordenacao();
     }
 }
 
@@ -2327,20 +5686,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+let pendingDeleteCategoryId = null;
+
 function showToast(message, type = 'success', duration = 3000) {
     const container = document.getElementById('toastContainer');
     if (!container) return;
 
     const toast = document.createElement('div');
     toast.className = 'toast';
-    
+    toast.classList.add(`toast-${type}`);
+
     const msgEl = document.createElement('p');
     msgEl.className = 'toast-message';
     msgEl.textContent = message;
-    
+
     const progressBar = document.createElement('div');
     progressBar.className = 'toast-progress-bar';
-    
+    // ajustar duração da animação da barra de progresso para o tempo do toast
+    progressBar.style.animationDuration = `${duration}ms`;
     toast.appendChild(msgEl);
     toast.appendChild(progressBar);
     container.appendChild(toast);
@@ -2349,6 +5712,47 @@ function showToast(message, type = 'success', duration = 3000) {
         toast.classList.add('fade-out');
         setTimeout(() => toast.remove(), 350);
     }, duration);
+}
+
+function promptDeleteCategory(catId) {
+    const cat = categorias.find(c => c.id === catId);
+    if (!cat) return;
+
+    pendingDeleteCategoryId = catId;
+    const title = document.getElementById('deleteCategoryConfirmTitle');
+    const message = document.getElementById('deleteCategoryConfirmMessage');
+    if (title) title.textContent = cat.nome;
+    if (message) message.textContent = 'Tem certeza que deseja excluir esta categoria?';
+
+    setModalVisible('deleteCategoryConfirmModal', true);
+}
+
+function cancelDeleteCategory() {
+    pendingDeleteCategoryId = null;
+    setModalVisible('deleteCategoryConfirmModal', false);
+}
+
+function confirmDeleteCategory() {
+    const catId = pendingDeleteCategoryId;
+    if (!catId) return;
+
+    const cat = categorias.find(c => c.id === catId);
+    if (!cat) {
+        cancelDeleteCategory();
+        return;
+    }
+
+    categorias = categorias.filter(c => c.id !== catId);
+    documentacoes.forEach(d => {
+        if (d.categoria === catId) d.categoria = categorias.length > 0 ? (categorias[0]?.id || 0) : 0;
+    });
+    salvarDados();
+    renderizarCategorias();
+    atualizarSelectsCategorias();
+    renderizarDocumentacoes();
+    atualizarStats();
+    cancelDeleteCategory();
+    showToast('✅ Categoria deletada!', 'error', 3500);
 }
 
 function fecharModalsEventos() {
@@ -2382,13 +5786,14 @@ function fecharModalsEventos() {
             document.querySelectorAll('#modalVersionToggle .version-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-                let content = version === 'normal' ? (doc.conteudo || '') : (doc.conteudoPasso || '');
-                if (!content || content.trim() === '') {
-                    const label = version === 'normal' ? 'normal' : 'passo a passo';
-                    document.getElementById('modalContent').innerHTML = `<p style="opacity:0.8">⚠️ Nenhuma versão ${label} disponível.</p>`;
-                } else {
-                    document.getElementById('modalContent').innerHTML = content;
-                }
+            const rawContent = version === 'normal' ? (doc.conteudo || '') : (doc.conteudoPasso || '');
+            const contentToShow = sanitizeDocReadContent(rawContent);
+            if (!contentToShow || contentToShow.trim() === '') {
+                const label = version === 'normal' ? 'normal' : 'passo a passo';
+                document.getElementById('modalContent').innerHTML = `<p style="opacity:0.8">⚠️ Nenhuma versão ${label} disponível.</p>`;
+            } else {
+                document.getElementById('modalContent').innerHTML = contentToShow;
+            }
         });
     });
 
@@ -2559,13 +5964,11 @@ try { window.toggleAddFieldsVisibility = toggleAddFieldsVisibility; } catch (e) 
             if (version === 'normal') {
                 document.getElementById('normalContentGroup').style.display = 'block';
                 document.getElementById('passoContentGroup').style.display = 'none';
-                document.getElementById('editContentType').textContent = 'Conteúdo Normal';
                 const passoBtn = document.getElementById('fullscreenEditToolbarBtnPasso');
                 if (passoBtn) passoBtn.style.display = 'none';
             } else {
                 document.getElementById('normalContentGroup').style.display = 'none';
                 document.getElementById('passoContentGroup').style.display = 'block';
-                document.getElementById('editContentType').textContent = 'Conteúdo Passo a Passo';
                 const passoBtn = document.getElementById('fullscreenEditToolbarBtnPasso');
                 if (passoBtn) passoBtn.style.display = 'inline-block';
             }
@@ -2589,11 +5992,320 @@ try { window.toggleAddFieldsVisibility = toggleAddFieldsVisibility; } catch (e) 
             if (e.target === categoryModal) setModalVisible('categoryModal', false);
         });
     }
+
+    const deleteCategoryConfirmModal = document.getElementById('deleteCategoryConfirmModal');
+    if (deleteCategoryConfirmModal) {
+        const cancelBtn = document.getElementById('cancelDeleteCategoryBtn');
+        const confirmBtn = document.getElementById('confirmDeleteCategoryBtn');
+        const closeBtn = document.querySelector('.close-delete-category');
+
+        if (cancelBtn) cancelBtn.addEventListener('click', cancelDeleteCategory);
+        if (confirmBtn) confirmBtn.addEventListener('click', confirmDeleteCategory);
+        if (closeBtn) closeBtn.addEventListener('click', cancelDeleteCategory);
+
+        window.addEventListener('click', (e) => {
+            if (e.target === deleteCategoryConfirmModal) cancelDeleteCategory();
+        });
+    }
 }
 
 function inicializarRichEditor() {
 
-    const allButtons = document.querySelectorAll('.editor-btn');
+    const allButtons = document.querySelectorAll('.editor-toolbar .editor-btn[data-command]');
+    const formatPopup = document.getElementById('formatPopup');
+    const formatPopupButtons = formatPopup ? formatPopup.querySelectorAll('.format-btn') : [];
+    let formatPopupEditor = null;
+    let formatPopupRange = null;
+    let formatPopupMouseDown = false;
+
+    function hideFormatPopup() {
+        if (!formatPopup) return;
+        formatPopup.classList.remove('visible');
+        formatPopup.setAttribute('aria-hidden', 'true');
+        formatPopup.style.display = '';
+        formatPopup.style.visibility = '';
+        formatPopup.style.top = '';
+        formatPopup.style.left = '';
+        formatPopupEditor = null;
+        formatPopupRange = null;
+    }
+
+    function showFormatPopupForSelection() {
+        if (!formatPopup) return hideFormatPopup();
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return hideFormatPopup();
+        const editor = getRichEditorFromSelection();
+        if (!editor) return hideFormatPopup();
+        const range = sel.getRangeAt(0);
+        if (range.collapsed) return hideFormatPopup();
+
+        let rect = range.getBoundingClientRect();
+        if (!rect || (!rect.width && !rect.height)) {
+            const rects = range.getClientRects();
+            rect = rects && rects[0] ? rects[0] : null;
+        }
+        if (!rect) return hideFormatPopup();
+
+        formatPopup.style.position = 'fixed';
+        formatPopup.style.display = 'flex';
+        formatPopup.style.visibility = 'hidden';
+        formatPopup.style.top = '0';
+        formatPopup.style.left = '0';
+        formatPopup.classList.add('visible');
+
+        const popupWidth = formatPopup.offsetWidth || 280;
+        const popupHeight = formatPopup.offsetHeight || 52;
+        const top = Math.max(8, rect.top - popupHeight - 10);
+        const left = Math.min(window.innerWidth - popupWidth - 8, Math.max(8, rect.left + rect.width / 2 - popupWidth / 2));
+
+        formatPopup.style.top = `${top}px`;
+        formatPopup.style.left = `${left}px`;
+        formatPopup.style.visibility = '';
+        formatPopup.setAttribute('aria-hidden', 'false');
+
+        formatPopupEditor = editor;
+        formatPopupRange = range.cloneRange();
+    }
+
+    function getRichEditorFromSelection() {
+        try {
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return null;
+            let node = sel.getRangeAt(0).commonAncestorContainer;
+            if (!node) return null;
+            if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+            return node ? node.closest('.rich-editor') : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    const blockTags = new Set(['ADDRESS','ARTICLE','ASIDE','AUDIO','BLOCKQUOTE','CANVAS','DD','DIV','DL','DT','FIELDSET','FIGCAPTION','FIGURE','FOOTER','FORM','H1','H2','H3','H4','H5','H6','HEADER','HGROUP','HR','LI','MAIN','NAV','NOSCRIPT','OL','OUTPUT','P','PRE','SECTION','TABLE','TFOOT','UL','VIDEO']);
+
+    function sanitizeSelectionContents(root, format) {
+        if (!root) return;
+        if (root.nodeType === Node.ELEMENT_NODE || root.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            const el = root.nodeType === Node.ELEMENT_NODE ? root : null;
+            Array.from(root.childNodes).forEach(child => sanitizeSelectionContents(child, format));
+
+            if (el) {
+                if (format === 'p') {
+                    const tag = el.tagName;
+                    if (tag && tag.match(/^H[1-6]$/)) {
+                        const paragraph = document.createElement('p');
+                        while (el.firstChild) paragraph.appendChild(el.firstChild);
+                        el.replaceWith(paragraph);
+                        sanitizeSelectionContents(paragraph, format);
+                        return;
+                    }
+                }
+
+                if (el.style) {
+                    el.style.fontSize = '';
+                    el.style.fontWeight = '';
+                    el.style.lineHeight = '';
+                    el.style.whiteSpace = '';
+                    el.style.display = '';
+                    if (!el.getAttribute('style') || !el.getAttribute('style').trim()) {
+                        el.removeAttribute('style');
+                    }
+                }
+
+                if (el.tagName === 'SPAN') {
+                    const preserveAttr = Array.from(el.attributes).some(attr => attr.name !== 'style');
+                    if (!preserveAttr) {
+                        const parent = el.parentNode;
+                        if (parent) {
+                            while (el.firstChild) parent.insertBefore(el.firstChild, el);
+                            parent.removeChild(el);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function setFormatStyles(el, format) {
+        if (!el || !el.style) return;
+        if (format === 'h1') {
+            el.style.fontSize = '24px';
+            el.style.fontWeight = '700';
+            el.style.lineHeight = '1.2';
+        } else if (format === 'h2') {
+            el.style.fontSize = '20px';
+            el.style.fontWeight = '600';
+            el.style.lineHeight = '1.25';
+        } else if (format === 'h3') {
+            el.style.fontSize = '18px';
+            el.style.fontWeight = '600';
+            el.style.lineHeight = '1.3';
+        } else if (format === 'p') {
+            el.style.fontSize = '';
+            el.style.fontWeight = '';
+            el.style.lineHeight = '';
+            el.style.whiteSpace = '';
+        }
+    }
+
+    function getHeadingStyledSpan(node) {
+        let current = node;
+        if (current && current.nodeType === Node.TEXT_NODE) current = current.parentElement;
+        while (current) {
+            if (current.tagName && current.tagName.toLowerCase() === 'span') {
+                try {
+                    const fs = window.getComputedStyle(current).fontSize || '';
+                    if (fs === '24px' || fs === '20px' || fs === '18px') return current;
+                } catch (e) {}
+            }
+            current = current.parentElement;
+        }
+        return null;
+    }
+
+    function normalizeParagraphFragment(root) {
+        if (!root) return;
+        const headingSpans = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+        while (walker.nextNode()) {
+            const el = walker.currentNode;
+            if (!el || el.tagName.toLowerCase() !== 'span') continue;
+            try {
+                const fs = window.getComputedStyle(el).fontSize || '';
+                if (fs === '24px' || fs === '20px' || fs === '18px') {
+                    el.style.fontSize = '';
+                    el.style.fontWeight = '';
+                    el.style.lineHeight = '';
+                    el.style.whiteSpace = '';
+                    el.style.display = '';
+                    const preserveAttr = Array.from(el.attributes).some(attr => attr.name !== 'style');
+                    if (!preserveAttr) headingSpans.push(el);
+                }
+            } catch (e) {}
+        }
+        headingSpans.forEach(el => {
+            const parent = el.parentNode;
+            if (!parent) return;
+            while (el.firstChild) parent.insertBefore(el.firstChild, el);
+            parent.removeChild(el);
+        });
+    }
+
+    function wrapSelectionInStyle(range, format) {
+        if (format === 'p') {
+            const startHeading = getHeadingStyledSpan(range.startContainer);
+            const endHeading = getHeadingStyledSpan(range.endContainer);
+            if (startHeading && endHeading && startHeading === endHeading) {
+                range.setStartBefore(startHeading);
+                range.setEndAfter(endHeading);
+            }
+        }
+
+        const extracted = range.extractContents();
+        sanitizeSelectionContents(extracted, format);
+        normalizeParagraphFragment(extracted);
+
+        const formattedFragment = document.createDocumentFragment();
+        const children = Array.from(extracted.childNodes);
+        const hasBlockChildren = children.some(node => node.nodeType === Node.ELEMENT_NODE && blockTags.has(node.tagName));
+        let lastInsertedNode = null;
+
+        if (!hasBlockChildren) {
+            if (format === 'p') {
+                formattedFragment.appendChild(extracted);
+                lastInsertedNode = formattedFragment.lastChild;
+            } else {
+                const wrapper = document.createElement('span');
+                wrapper.style.whiteSpace = 'pre-wrap';
+                wrapper.style.display = 'inline';
+                setFormatStyles(wrapper, format);
+                wrapper.appendChild(extracted);
+                formattedFragment.appendChild(wrapper);
+                lastInsertedNode = wrapper;
+            }
+        } else {
+            children.forEach(node => {
+                if (format === 'p') {
+                    if (node.nodeType === Node.ELEMENT_NODE && blockTags.has(node.tagName)) {
+                        if (node.tagName.toLowerCase() === 'span') {
+                            const heading = getHeadingStyledSpan(node);
+                            if (heading === node) {
+                                const replacement = document.createElement('span');
+                                while (node.firstChild) replacement.appendChild(node.firstChild);
+                                unwrapHeadingSpans(replacement);
+                                formattedFragment.appendChild(replacement);
+                                lastInsertedNode = replacement;
+                                return;
+                            }
+                        }
+                        setFormatStyles(node, format);
+                        formattedFragment.appendChild(node);
+                        lastInsertedNode = node;
+                    } else {
+                        formattedFragment.appendChild(node);
+                        lastInsertedNode = node;
+                    }
+                } else {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        const wrapper = document.createElement('span');
+                        wrapper.style.whiteSpace = 'pre-wrap';
+                        wrapper.style.display = 'inline';
+                        setFormatStyles(wrapper, format);
+                        wrapper.appendChild(node);
+                        formattedFragment.appendChild(wrapper);
+                        lastInsertedNode = wrapper;
+                    } else if (node.nodeType === Node.ELEMENT_NODE && blockTags.has(node.tagName)) {
+                        setFormatStyles(node, format);
+                        formattedFragment.appendChild(node);
+                        lastInsertedNode = node;
+                    } else if (node.nodeType === Node.ELEMENT_NODE) {
+                        setFormatStyles(node, format);
+                        formattedFragment.appendChild(node);
+                        lastInsertedNode = node;
+                    } else {
+                        formattedFragment.appendChild(node);
+                        lastInsertedNode = node;
+                    }
+                }
+            });
+        }
+
+        range.insertNode(formattedFragment);
+
+        if (lastInsertedNode) {
+            const sel = window.getSelection();
+            if (sel) {
+                sel.removeAllRanges();
+                const afterRange = document.createRange();
+                try {
+                    afterRange.setStartAfter(lastInsertedNode);
+                } catch (e) {
+                    afterRange.setStart(range.endContainer, range.endOffset);
+                }
+                afterRange.collapse(true);
+                sel.addRange(afterRange);
+            }
+        }
+    }
+
+    function applyFormatToSelection(format) {
+        const sel = window.getSelection();
+        if (!sel) return;
+        if ((!sel.rangeCount || sel.isCollapsed) && formatPopupRange) {
+            sel.removeAllRanges();
+            sel.addRange(formatPopupRange.cloneRange());
+        }
+
+        if (!sel.rangeCount || sel.isCollapsed) return;
+
+        if (['bold', 'italic', 'underline'].includes(format)) {
+            document.execCommand(format, false, null);
+        } else if (['p', 'h1', 'h2', 'h3'].includes(format)) {
+            const range = sel.getRangeAt(0);
+            wrapSelectionInStyle(range, format);
+        }
+
+        hideFormatPopup();
+    }
 
     function isSelectionInsideHeading(editorDiv) {
         try {
@@ -2605,11 +6317,11 @@ function inicializarRichEditor() {
             while (node && node !== editorDiv) {
                 if (!node.tagName) { node = node.parentElement; continue; }
                 const tag = node.tagName.toLowerCase();
-                if (tag === 'h2' || tag === 'h3') return true;
+                if (tag === 'h1' || tag === 'h2' || tag === 'h3') return true;
                 if (tag === 'span') {
                     try {
                         const fs = window.getComputedStyle(node).fontSize || '';
-                        if (fs === '24px' || fs === '20px') return true;
+                        if (fs === '24px' || fs === '20px' || fs === '18px') return true;
                     } catch (e) {}
                 }
                 node = node.parentElement;
@@ -2723,38 +6435,7 @@ function inicializarRichEditor() {
 
                     if (hasSelection) {
                         const range = sel.getRangeAt(0);
-
-                        // Create span to wrap selection with inline styles
-
-                        const span = document.createElement('span');
-                        // use absolute px sizes to avoid multiplicative nesting
-                        if (value === 'h2') {
-                            span.style.fontSize = '24px';
-                            span.style.fontWeight = '700';
-                            span.style.lineHeight = '1.2';
-                        } else if (value === 'h3') {
-                            span.style.fontSize = '20px';
-                            span.style.fontWeight = '600';
-                            span.style.lineHeight = '1.25';
-                        } else if (value === 'p') {
-                            span.style.fontSize = '16px';
-                            span.style.fontWeight = '400';
-                            span.style.lineHeight = '1.6';
-                        }
-
-                        // Extract contents, sanitize inner font-size styles and insert span
-                        const extracted = range.extractContents();
-                        extracted.querySelectorAll && extracted.querySelectorAll('*').forEach(el => {
-                            if (el.style) el.style.fontSize = '';
-                        });
-                        span.appendChild(extracted);
-                        range.insertNode(span);
-
-                        // Normalize selection to the new span (selection case: do NOT set sticky)
-                        sel.removeAllRanges();
-                        const newRange = document.createRange();
-                        newRange.selectNodeContents(span);
-                        sel.addRange(newRange);
+                        wrapSelectionInStyle(range, value);
 
                         // Ensure no sticky format is set when user formatted a selection
                         if (editorDiv && editorDiv.dataset) editorDiv.dataset.stickyFormat = '';
@@ -2784,8 +6465,9 @@ function inicializarRichEditor() {
                                 if (!el || el.tagName !== 'SPAN') return false;
                                 try {
                                     const fs = window.getComputedStyle(el).fontSize || '';
-                                    if (value === 'h2') return fs === '24px';
-                                    if (value === 'h3') return fs === '20px';
+                                    if (value === 'h1') return fs === '24px';
+                                    if (value === 'h2') return fs === '20px';
+                                    if (value === 'h3') return fs === '18px';
                                     if (value === 'p') return fs === '16px';
                                 } catch (e) {}
                                 return false;
@@ -2855,14 +6537,18 @@ function inicializarRichEditor() {
 
                                 // Create new styled span and insert at caret
                                 const spanNew = document.createElement('span');
-                                if (value === 'h2') {
+                                if (value === 'h1') {
                                     spanNew.style.fontSize = '24px';
                                     spanNew.style.fontWeight = '700';
                                     spanNew.style.lineHeight = '1.2';
-                                } else if (value === 'h3') {
+                                } else if (value === 'h2') {
                                     spanNew.style.fontSize = '20px';
                                     spanNew.style.fontWeight = '600';
                                     spanNew.style.lineHeight = '1.25';
+                                } else if (value === 'h3') {
+                                    spanNew.style.fontSize = '18px';
+                                    spanNew.style.fontWeight = '600';
+                                    spanNew.style.lineHeight = '1.3';
                                 } else if (value === 'p') {
                                     spanNew.style.fontSize = '16px';
                                     spanNew.style.fontWeight = '400';
@@ -2874,15 +6560,15 @@ function inicializarRichEditor() {
 
                                 range2.insertNode(spanNew);
 
-                                // Place caret after zero-width char inside span
+                                // Place caret after the new span so typing continues in paragraph.
                                 const newRange = document.createRange();
-                                newRange.setStart(zw, 1);
+                                newRange.setStartAfter(spanNew);
                                 newRange.collapse(true);
                                 sel2.removeAllRanges();
                                 sel2.addRange(newRange);
                                 editorDiv.focus();
 
-                                if (editorDiv && editorDiv.dataset) editorDiv.dataset.stickyFormat = value || '';
+                                if (editorDiv && editorDiv.dataset) editorDiv.dataset.stickyFormat = '';
                             }
                         } catch (err) {
                             console.error('formatBlock caret inline error', err);
@@ -2922,15 +6608,52 @@ function inicializarRichEditor() {
                 updateToolbarButtons(toolbar, editor);
                 hasUnsavedChanges = true;
             });
-            editor.addEventListener('keyup', () => updateToolbarButtons(toolbar, editor));
-            editor.addEventListener('mouseup', () => updateToolbarButtons(toolbar, editor));
+            editor.addEventListener('keyup', () => {
+                updateToolbarButtons(toolbar, editor);
+                showFormatPopupForSelection();
+            });
+            editor.addEventListener('mouseup', () => {
+                updateToolbarButtons(toolbar, editor);
+                setTimeout(showFormatPopupForSelection, 0);
+            });
             editor.addEventListener('focus', () => { updateToolbarButtons(toolbar, editor); lastFocusedEditorId = editor.id; });
             editor.addEventListener('blur', () => {
-
-                setTimeout(() => updateToolbarButtons(toolbar, editor), 10);
+                setTimeout(() => {
+                    updateToolbarButtons(toolbar, editor);
+                    hideFormatPopup();
+                }, 10);
             });
         }
     });
+
+    document.addEventListener('mousedown', (event) => {
+        if (!formatPopup) return;
+        if (formatPopup.contains(event.target)) {
+            formatPopupMouseDown = true;
+            return;
+        }
+        if (!event.target.closest('.rich-editor')) {
+            hideFormatPopup();
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        formatPopupMouseDown = false;
+    });
+
+    if (formatPopupButtons && formatPopupButtons.length) {
+        formatPopupButtons.forEach(button => {
+            button.addEventListener('mousedown', (event) => {
+                event.preventDefault();
+                formatPopupMouseDown = true;
+            });
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                const format = button.dataset.format;
+                applyFormatToSelection(format);
+            });
+        });
+    }
 
     // cleanup temporary zero-width placeholders inserted when toggling off headings
     document.querySelectorAll('.rich-editor').forEach(editor => {
@@ -2967,8 +6690,9 @@ function inicializarRichEditor() {
                         if (node && node.tagName && node.tagName.toLowerCase() === 'span') {
                             const fs = window.getComputedStyle(node).fontSize || '';
                             const sticky = editor.dataset?.stickyFormat || '';
-                            if ((fs === '24px' || fs === '20px') && !sticky) {
-                                // unwrap span: move its children out and remove it
+                            const normalizedText = (node.textContent || '').replace(/\u200B/g, '').trim();
+                            if ((fs === '24px' || fs === '20px') && !sticky && !normalizedText) {
+                                // unwrap only empty heading spans or placeholder-only spans
                                 const parent = node.parentNode;
                                 while (node.firstChild) parent.insertBefore(node.firstChild, node);
                                 parent.removeChild(node);
@@ -2980,23 +6704,29 @@ function inicializarRichEditor() {
         });
     });
 
-    document.getElementById('docEditorImageBtn')?.addEventListener('click', (e) => {
+    const docEditorImageBtn = document.getElementById('docEditorImageBtn');
+    docEditorImageBtn?.addEventListener('click', (e) => {
         e.preventDefault();
-
-        saveSelectionForEditor('docContent');
-        document.getElementById('docEditorImageInput').click();
+        const editor = document.getElementById('docContent');
+        const placeholder = insertManualImagePlaceholderAtCursor(editor);
+        if (placeholder) placeholder.scrollIntoView({ block: 'nearest' });
     });
 
     document.getElementById('docEditorImageInput')?.addEventListener('change', (e) => {
-
-        restoreSelectionForEditor('docContent');
-        inserirImagemNoEditor(e.target.files, 'docContent');
+        if (pendingImagePlaceholderForNormalDoc && pendingImagePlaceholderForNormalDoc.dataset.editor === 'docContent') {
+            inserirImagemNoEditorAtPlaceholder(e.target.files, pendingImagePlaceholderForNormalDoc, 'docContent');
+            pendingImagePlaceholderForNormalDoc = null;
+        } else {
+            restoreSelectionForEditor('docContent');
+            inserirImagemNoEditor(e.target.files, 'docContent');
+        }
         e.target.value = '';
     });
 
-    document.getElementById('docPassoImageBtn')?.addEventListener('click', (e) => {
+    const docPassoImageBtn = document.getElementById('docPassoImageBtn');
+    docPassoImageBtn?.addEventListener('mousedown', () => saveSelectionForEditor('docPassoContent'));
+    docPassoImageBtn?.addEventListener('click', (e) => {
         e.preventDefault();
-        saveSelectionForEditor('docPassoContent');
         document.getElementById('docPassoEditorImageInput').click();
     });
 
@@ -3006,21 +6736,29 @@ function inicializarRichEditor() {
         e.target.value = '';
     });
 
-    document.getElementById('editDocEditorImageBtn')?.addEventListener('click', (e) => {
+    const editDocEditorImageBtn = document.getElementById('editDocEditorImageBtn');
+    editDocEditorImageBtn?.addEventListener('click', (e) => {
         e.preventDefault();
-        saveSelectionForEditor('editDocContent');
-        document.getElementById('editDocEditorImageInput').click();
+        const editor = document.getElementById('editDocContent');
+        const placeholder = insertManualImagePlaceholderAtCursor(editor);
+        if (placeholder) placeholder.scrollIntoView({ block: 'nearest' });
     });
 
     document.getElementById('editDocEditorImageInput')?.addEventListener('change', (e) => {
-        restoreSelectionForEditor('editDocContent');
-        inserirImagemNoEditor(e.target.files, 'editDocContent');
+        if (pendingImagePlaceholderForNormalDoc && pendingImagePlaceholderForNormalDoc.dataset.editor === 'editDocContent') {
+            inserirImagemNoEditorAtPlaceholder(e.target.files, pendingImagePlaceholderForNormalDoc, 'editDocContent');
+            pendingImagePlaceholderForNormalDoc = null;
+        } else {
+            restoreSelectionForEditor('editDocContent');
+            inserirImagemNoEditor(e.target.files, 'editDocContent');
+        }
         e.target.value = '';
     });
 
-    document.getElementById('editDocPassoImageBtn')?.addEventListener('click', (e) => {
+    const editDocPassoImageBtn = document.getElementById('editDocPassoImageBtn');
+    editDocPassoImageBtn?.addEventListener('mousedown', () => saveSelectionForEditor('editDocPassoContent'));
+    editDocPassoImageBtn?.addEventListener('click', (e) => {
         e.preventDefault();
-        saveSelectionForEditor('editDocPassoContent');
         document.getElementById('editDocPassoImageInput').click();
     });
 
@@ -3036,9 +6774,84 @@ function inicializarRichEditor() {
                 editor.innerHTML = '';
             }
         });
-    });
 
-    
+        if (editor.id === 'docContent' || editor.id === 'editDocContent') {
+            editor.addEventListener('keydown', (e) => {
+                handleRichEditorEnter(editor, e);
+                if (e.defaultPrevented) return;
+
+                if (e.key !== 'Backspace' && e.key !== 'Delete') {
+                    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                        ensureParagraphTyping(editor);
+                    }
+                    preserveImagePlaceholderBlock(editor);
+                    return;
+                }
+                const sel = window.getSelection();
+                if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+                const range = sel.getRangeAt(0);
+                let node = range.startContainer;
+                if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+                if (!node) return;
+                let block = node;
+                while (block && block.parentNode !== editor) {
+                    block = block.parentNode;
+                }
+                if (!block || block.parentNode !== editor) return;
+
+                if (e.key === 'Backspace' || e.key === 'Delete') {
+                    const paragraph = node.closest('p[data-image-paragraph="true"]');
+                    const previousBlock = paragraph && paragraph.previousElementSibling;
+                    const isImageSpacingParagraph = paragraph && previousBlock && previousBlock.classList.contains('doc-image-placeholder-wrapper') && (!paragraph.textContent || paragraph.textContent.trim() === '' || paragraph.innerHTML === '<br>' || paragraph.innerHTML === '<br/>');
+                    if (isImageSpacingParagraph) {
+                        e.preventDefault();
+                        paragraph.innerHTML = '<br>';
+                        preserveImagePlaceholderBlock(editor);
+                        return;
+                    }
+                }
+            });
+            editor.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.doc-image-placeholder-remove-btn');
+                if (removeBtn) {
+                    const wrapper = removeBtn.closest('.doc-image-placeholder-wrapper');
+                    if (!wrapper || wrapper.dataset.aiVisual === 'true' || wrapper.classList.contains('ai-image-placeholder')) return;
+                    const next = wrapper.nextElementSibling;
+                    if (next) imagePlaceholderDisabledNodes.add(next);
+                    wrapper.remove();
+                    return;
+                }
+
+                const btn = e.target.closest('.doc-image-placeholder-btn');
+                if (!btn) return;
+                const wrapper = btn.closest('.doc-image-placeholder-wrapper');
+                if (!wrapper || wrapper.dataset.aiVisual === 'true' || wrapper.classList.contains('ai-image-placeholder')) return;
+                pendingImagePlaceholderForNormalDoc = wrapper;
+                const editorId = wrapper.dataset.editor;
+                if (editorId === 'editDocContent') {
+                    document.getElementById('editDocEditorImageInput')?.click();
+                } else {
+                    document.getElementById('docEditorImageInput')?.click();
+                }
+            });
+            editor.addEventListener('input', () => {
+                replaceImageShortcutTokens(editor);
+                stripRichEditorListFormatting(editor);
+                ensureImagePlaceholdersInNormalEditor(editor);
+                preserveImagePlaceholderBlock(editor);
+            });
+            editor.addEventListener('keyup', () => {
+                replaceImageShortcutTokens(editor);
+                stripRichEditorListFormatting(editor);
+                ensureImagePlaceholdersInNormalEditor(editor);
+                preserveImagePlaceholderBlock(editor);
+            });
+            editor.addEventListener('focus', () => {
+                ensureImagePlaceholdersInNormalEditor(editor);
+                preserveImagePlaceholderBlock(editor);
+            });
+        }
+    });
 
     // chat send buttons removed
 
@@ -3059,8 +6872,8 @@ function inicializarRichEditor() {
                 }
             }
 
-            // otherwise, just open the chat view
-            mudarSecao('chat');
+                // otherwise, just open the chat page
+            openChat();
         });
     }
 }
@@ -3080,12 +6893,13 @@ function updateToolbarButtons(toolbar, editor) {
             while (node && node !== editor) {
                 if (node.tagName) {
                     const t = node.tagName.toLowerCase();
-                    if (t === 'h2' || t === 'h3') return t;
+                    if (t === 'h1' || t === 'h2' || t === 'h3') return t;
                     if (t === 'span') {
                         try {
                             const fs = window.getComputedStyle(node).fontSize || '';
-                            if (fs === '24px') return 'h2';
-                            if (fs === '20px') return 'h3';
+                            if (fs === '24px') return 'h1';
+                            if (fs === '20px') return 'h2';
+                            if (fs === '18px') return 'h3';
                         } catch (e) {}
                     }
                 }
@@ -3098,7 +6912,6 @@ function updateToolbarButtons(toolbar, editor) {
     const currentHeading = detectHeadingAtSelection();
     const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
 
-    // Determine a single active format (mutually exclusive H2/H3)
     let activeFormat = '';
     if (!hasSelection) {
         try {
@@ -3107,13 +6920,16 @@ function updateToolbarButtons(toolbar, editor) {
                 activeFormat = sticky;
             } else if (currentHeading) {
                 activeFormat = currentHeading;
+            } else {
+                activeFormat = 'p';
             }
-        } catch (e) {}
+        } catch (e) {
+            activeFormat = 'p';
+        }
     }
 
-    // If there's a temporary zero-width placeholder inserted when toggling
-    // headings off, treat as no active format to avoid leaving a heading
-    // button visually highlighted until the placeholder is cleaned on input.
+    const isHeadingFormat = activeFormat && activeFormat !== 'p';
+
     try {
         if (editor && editor.dataset && editor.dataset.tempZw) {
             activeFormat = '';
@@ -3129,33 +6945,22 @@ function updateToolbarButtons(toolbar, editor) {
         btn.classList.remove('disabled');
 
         if (command === 'formatBlock') {
-            if (hasSelection) {
-                btn.classList.remove('active');
-            } else {
-                if (activeFormat && activeFormat === value) {
-                    btn.classList.add('active');
-                } else {
-                    btn.classList.remove('active');
-                }
+            if (!hasSelection && activeFormat && activeFormat === value) {
+                btn.classList.add('active');
             }
-        } else if (['bold', 'italic', 'underline', 'insertUnorderedList'].includes(command)) {
-            // If inside a heading-like format, disable bold
-            if (command === 'bold' && activeFormat) {
+        } else if (['bold', 'italic', 'underline'].includes(command)) {
+            if (command === 'bold' && isHeadingFormat) {
                 btn.disabled = true;
                 btn.classList.add('disabled');
                 btn.classList.remove('active');
             } else {
-                // Active if queryCommandState OR if caret-only and stickyFormat matches
                 let isActive = false;
                 try { isActive = document.queryCommandState(command); } catch (e) { isActive = false; }
-
                 if (!hasSelection) {
                     const sticky = editor.dataset?.stickyFormat || '';
                     if (sticky === command) isActive = true;
                 }
-
                 if (isActive) btn.classList.add('active');
-                else btn.classList.remove('active');
             }
         }
     });
@@ -3194,6 +6999,14 @@ function normalizeEditorAfterFullscreen(editor) {
                         parent.removeChild(node);
                     }
                 }
+                // Após inicializar todos os editores, tentar restaurar rascunho (priorizar sessão)
+                try {
+                    const hasSessionPayload = (() => { try { return !!sessionStorage.getItem('dochub-chat-session-return-payload'); } catch(e){ return false; } })();
+                    const hasLocalPayload = (() => { try { return !!localStorage.getItem('dochub-chat-return-payload') || !!localStorage.getItem(STORAGE_SIDEBAR_DRAFT) || !!localStorage.getItem('dochub-debug-last-saved-draft'); } catch(e){ return false; } })();
+                    if (hasSessionPayload || hasLocalPayload) {
+                        try { if (typeof restaurarRascunhoAdicionar === 'function') restaurarRascunhoAdicionar(); } catch(e) {}
+                    }
+                } catch(e) {}
             }
         } catch (e) {}
 
@@ -3201,6 +7014,65 @@ function normalizeEditorAfterFullscreen(editor) {
         const toolbar = editor.previousElementSibling;
         if (toolbar && toolbar.classList.contains('editor-toolbar')) updateToolbarButtons(toolbar, editor);
     } catch (e) {}
+}
+
+function findHeadingAncestor(node, editor, offset) {
+    try {
+        if (!node) return null;
+        let current = node;
+        if (current.nodeType === Node.TEXT_NODE) current = current.parentElement;
+
+        if (current === editor && typeof offset === 'number' && offset > 0) {
+            const previousNode = editor.childNodes[offset - 1];
+            if (previousNode && previousNode.nodeType === Node.ELEMENT_NODE && previousNode.tagName.toLowerCase() === 'span') {
+                try {
+                    const fs = window.getComputedStyle(previousNode).fontSize || '';
+                    if (fs === '24px' || fs === '20px' || fs === '18px') {
+                        return previousNode;
+                    }
+                } catch (e) {}
+            }
+        }
+
+        while (current && current !== editor) {
+            if (current.tagName && current.tagName.toLowerCase() === 'span') {
+                try {
+                    const fs = window.getComputedStyle(current).fontSize || '';
+                    if (fs === '24px' || fs === '20px' || fs === '18px') {
+                        return current;
+                    }
+                } catch (e) {}
+            }
+            current = current.parentElement;
+        }
+    } catch (e) {}
+    return null;
+}
+
+function ensureParagraphTyping(editor) {
+    try {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+        const range = sel.getRangeAt(0);
+        const headingSpan = findHeadingAncestor(range.startContainer, editor, range.startOffset);
+        if (!headingSpan) return false;
+
+        const endRange = document.createRange();
+        endRange.selectNodeContents(headingSpan);
+        endRange.collapse(false);
+        if (range.compareBoundaryPoints(Range.START_TO_END, endRange) !== 0) return false;
+
+        const afterRange = document.createRange();
+        afterRange.setStartAfter(headingSpan);
+        afterRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(afterRange);
+
+        if (editor && editor.dataset) editor.dataset.stickyFormat = '';
+        return true;
+    } catch (e) {
+        return false;
+    }
 }
 
 function inserirImagemNoEditor(files, editorId) {
@@ -3248,13 +7120,13 @@ function inserirImagemNoEditor(files, editorId) {
                         newP.appendChild(imgElement);
 
                         const selection = window.getSelection();
-                        let insertNode = editor;
+                        let insertNode = null;
                         
-                        if (selection.rangeCount > 0) {
+                        if (selection && selection.rangeCount > 0) {
                             const range = selection.getRangeAt(0);
                             const commonAncestor = range.commonAncestorContainer;
 
-                            let node = commonAncestor.nodeType === Node.TEXT_NODE ? 
+                            let node = commonAncestor && commonAncestor.nodeType === Node.TEXT_NODE ? 
                                        commonAncestor.parentNode : commonAncestor;
                             
                             while (node && node.parentNode !== editor) {
@@ -3262,16 +7134,12 @@ function inserirImagemNoEditor(files, editorId) {
                             }
                             
                             if (node && node.parentNode === editor) {
-
-                                insertNode = node.nextSibling ? node.nextSibling : null;
-                                if (insertNode) {
-                                    editor.insertBefore(newP, insertNode);
-                                } else {
-                                    editor.appendChild(newP);
-                                }
-                            } else {
-                                editor.appendChild(newP);
+                                insertNode = node;
                             }
+                        }
+
+                        if (insertNode) {
+                            editor.insertBefore(newP, insertNode);
                         } else {
                             editor.appendChild(newP);
                         }
@@ -3356,46 +7224,7 @@ function mudarSecao(secao) {
         if (navMenu) navMenu.style.display = '';
     }
 
-    // If opening chat, inject a top bar (outside the chat input) with a back button and scope text
-    try {
-        const chatWrapper = document.querySelector('#chat .chat-wrapper');
-        const chatContainer = chatWrapper ? chatWrapper.querySelector('.chat-container') : null;
-        if (secao === 'chat' && chatWrapper && chatContainer) {
-            let topBar = document.getElementById('chatTopBar');
-            if (!topBar) {
-                topBar = document.createElement('div');
-                topBar.id = 'chatTopBar';
-                topBar.className = 'chat-top-bar';
-                chatWrapper.insertBefore(topBar, chatContainer);
-            }
-
-            let backBtn = document.getElementById('chatBackBtn');
-            if (!backBtn) {
-                backBtn = document.createElement('button');
-                backBtn.id = 'chatBackBtn';
-                backBtn.className = 'btn-secondary';
-                backBtn.addEventListener('click', () => goBackFromChat());
-                topBar.appendChild(backBtn);
-            }
-
-            let topText = document.getElementById('chatTopText');
-            if (!topText) {
-                topText = document.createElement('div');
-                topText.id = 'chatTopText';
-                topText.className = 'chat-top-text';
-                topBar.appendChild(topText);
-            }
-
-            if (currentChatOrigin && currentChatOrigin.type === 'edit') backBtn.textContent = '↩️';
-            else if (currentChatOrigin && currentChatOrigin.type === 'create') backBtn.textContent = '↩️';
-            else backBtn.textContent = '↩️';
-
-            // topText will be managed by setChatScopeBanner(); leave empty by default
-        } else {
-            const topBar = document.getElementById('chatTopBar');
-            if (topBar) topBar.remove();
-        }
-    } catch (e) {}
+    // Chat header/topBar and options removed per user request
 
     // Remover fullscreen-add ao mudar seção
     document.body.classList.remove('fullscreen-add');
@@ -3428,13 +7257,26 @@ function mudarSecao(secao) {
 function adicionarDocumentacao(e) {
     e.preventDefault();
 
-    const titulo = document.getElementById('docTitle').value.trim();
-    const descricao = document.getElementById('docDescription').value.trim();
-    const conteudo = document.getElementById('docContent').innerHTML.trim();
-    const conteudoPasso = document.getElementById('docPassoContent') ? document.getElementById('docPassoContent').innerHTML.trim() : '';
+    const tituloInput = document.getElementById('docTitle');
+    const descricaoInput = document.getElementById('docDescription');
+    const categorySelect = document.getElementById('docCategory');
+    const tagsInput = document.getElementById('docTags');
+    const docContentEl = document.getElementById('docContent');
+
+    if (!tituloInput || !descricaoInput || !categorySelect || !tagsInput) {
+        alert('❌ Erro interno: campos obrigatórios não encontrados.');
+        return;
+    }
+
+    const descricao = descricaoInput.value.trim();
+    cleanNormalDocImagePlaceholders(docContentEl);
+    const conteudo = docContentEl ? docContentEl.innerHTML.trim() : '';
+
+    const docPassoEl = document.getElementById('docPassoContent');
+    const conteudoPasso = docPassoEl ? docPassoEl.innerHTML.trim() : '';
     const tipoSelecionado = document.getElementById('docType') ? document.getElementById('docType').value : 'normal';
-    let catId = parseInt(document.getElementById('docCategory').value) || 0;
-    let tags = document.getElementById('docTags').value.split(',').map(t => {
+    let catId = parseInt(categorySelect.value) || 0;
+    let tags = tagsInput.value.split(',').map(t => {
         let tag = t.trim();
         if (tag.startsWith('#')) tag = tag.substring(1);
         return tag;
@@ -3445,7 +7287,8 @@ function adicionarDocumentacao(e) {
         return;
     }
 
-    if (!titulo || !descricao) {
+    const tituloRaw = tituloInput ? String(tituloInput.value || '').trim() : '';
+    if (!tituloRaw || !descricao) {
         alert('❌ Preencha os campos obrigatórios!');
         return;
     }
@@ -3485,7 +7328,6 @@ function adicionarDocumentacao(e) {
         if (currentSelectedCategory !== 'todos') {
             catId = parseInt(currentSelectedCategory);
         } else {
-
             catId = categorias.length > 0 ? (categorias[0]?.id || 0) : 0;
         }
     }
@@ -3495,6 +7337,11 @@ function adicionarDocumentacao(e) {
         categoriaDoc = 'todos';
     } else {
         categoriaDoc = String(catId);
+    }
+
+    const titulo = buildDocTitleWithCategory(tituloRaw, catId);
+    if (tituloInput) {
+        tituloInput.value = titulo;
     }
 
     documentacoes.push({
@@ -3575,14 +7422,10 @@ function renderizarDocumentacoes(docs = null) {
         card.innerHTML = `
             <div class="card-top">
                 <div class="doc-icon">${getIconeCategoria(doc.categoria)}</div>
-                <div class="doc-title tooltip" title="${doc.titulo}">${doc.titulo}
-                    <span class="tooltip-text">${doc.titulo}</span>
-                </div>
+                <div class="doc-title" title="${doc.titulo}">${doc.titulo}</div>
             </div>
             <div class="card-body">
-                <p class="doc-description tooltip" title="${doc.descricao}">${doc.descricao}
-                    <span class="tooltip-text">${doc.descricao}</span>
-                </p>
+                <p class="doc-description" title="${doc.descricao}">${doc.descricao}</p>
             </div>
             <div class="doc-footer">
                 ${tagsHTML}
@@ -3590,10 +7433,119 @@ function renderizarDocumentacoes(docs = null) {
                     <div class="doc-category">${getNomeCategoria(doc.categoria)}</div>
                     <span class="doc-date">📅 ${doc.dataCriacao}</span>
                 </div>
+                <div class="doc-footer-actions">
+                    <button class="doc-open-btn btn-primary btn-small" aria-label="Abrir documentação">Abrir</button>
+                </div>
             </div>
         `;
-        card.addEventListener('click', () => abrirDocumento(doc));
+        // Anexar o card ao container e configurar handlers:
+        // - Clicar em qualquer área do card abre o documento
+        // - A descrição (`.doc-description`) NÃO abre (click é bloqueado)
         container.appendChild(card);
+
+        // adicionar SVG overlay para animação do contorno (calculamos o perímetro dinamicamente)
+        try {
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const wrapperSvg = document.createElement('div');
+            wrapperSvg.className = 'card-border-svg';
+
+            const svgEl = document.createElementNS(svgNS, 'svg');
+            svgEl.setAttribute('preserveAspectRatio', 'none');
+            svgEl.setAttribute('width', '100%');
+            svgEl.setAttribute('height', '100%');
+            svgEl.setAttribute('viewBox', '0 0 100 100');
+
+            const rectEl = document.createElementNS(svgNS, 'rect');
+            rectEl.setAttribute('x', '1');
+            rectEl.setAttribute('y', '1');
+            rectEl.setAttribute('width', '98');
+            rectEl.setAttribute('height', '98');
+            rectEl.setAttribute('rx', '8');
+            rectEl.setAttribute('ry', '8');
+
+            svgEl.appendChild(rectEl);
+            wrapperSvg.appendChild(svgEl);
+            card.appendChild(wrapperSvg);
+
+            // Preserva a animação de borda e o fade-out suave quando o mouse sai do card.
+            card.addEventListener('mouseenter', () => {
+                const rect = card.querySelector('.card-border-svg rect');
+                if (rect) {
+                    rect.style.animation = 'none';
+                    rect.style.strokeDashoffset = String(rect.getTotalLength());
+                    void rect.offsetWidth;
+                    rect.style.animation = '';
+                }
+                card.classList.remove('card-hovering', 'card-leaving');
+                clearTimeout(card._hoverLeaveTimeout);
+                clearTimeout(card._hoverCompleteTimeout);
+                card.classList.add('card-hovering');
+                card._hoverCompleteTimeout = setTimeout(() => {
+                    if (card.classList.contains('card-hovering')) {
+                        card.classList.remove('card-hovering');
+                        card.classList.add('card-complete');
+                    }
+                }, 900);
+            });
+
+            card.addEventListener('mouseleave', () => {
+                const rect = card.querySelector('.card-border-svg rect');
+                if (rect) {
+                    rect.style.animation = 'none';
+                    void rect.offsetWidth;
+                    rect.style.animation = '';
+                }
+                clearTimeout(card._hoverLeaveTimeout);
+                clearTimeout(card._hoverCompleteTimeout);
+                card.classList.remove('card-hovering');
+                card.classList.add('card-leaving');
+                card._hoverLeaveTimeout = setTimeout(() => {
+                    card.classList.remove('card-leaving');
+                    if (rect) {
+                        rect.style.animation = 'none';
+                        rect.style.strokeDashoffset = String(rect.getTotalLength());
+                        rect.style.opacity = '';
+                    }
+                }, 1400);
+            });
+
+            // após layout, calcular perímetro aproximado (2*(w+h)) e aplicar como --dashlen
+            setTimeout(() => {
+                try {
+                    const r = card.getBoundingClientRect();
+                    const w = Math.max(0, Math.round(r.width));
+                    const h = Math.max(0, Math.round(r.height));
+                    const perim = Math.max(40, Math.round(2 * (w + h - 4)));
+                    rectEl.style.setProperty('--dashlen', perim);
+                    // ajustar viewBox e rect para cobrir o cartão com pequena margem
+                    svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+                    rectEl.setAttribute('x', '2');
+                    rectEl.setAttribute('y', '2');
+                    rectEl.setAttribute('width', String(Math.max(0, w - 4)));
+                    rectEl.setAttribute('height', String(Math.max(0, h - 4)));
+                } catch (e) { /* silencioso */ }
+            }, 60);
+        } catch (e) { /* silencioso */ }
+
+        // abrir ao clicar no card (qualquer lugar exceto elementos que chamem stopPropagation)
+        card.addEventListener('click', () => abrirDocumento(doc));
+
+        const titleEl = card.querySelector('.doc-title');
+        if (titleEl) {
+            titleEl.style.cursor = 'pointer';
+            titleEl.addEventListener('click', (e) => { e.stopPropagation(); abrirDocumento(doc); });
+        }
+
+        const openBtn = card.querySelector('.doc-open-btn');
+        if (openBtn) {
+            openBtn.addEventListener('click', (e) => { e.stopPropagation(); abrirDocumento(doc); });
+        }
+
+        const descEl = card.querySelector('.doc-description');
+        if (descEl) {
+            descEl.style.cursor = 'default';
+            descEl.addEventListener('click', (e) => { e.stopPropagation(); });
+        }
     });
 
     // Se estiver em modo reordenação, reaplicar os estilos e event listeners
@@ -3647,6 +7599,30 @@ function renderizarDocumentacoes(docs = null) {
 
 
 
+function sanitizeDocReadContent(html = '') {
+    const container = document.createElement('div');
+    container.innerHTML = html || '';
+
+    container.querySelectorAll('.doc-image-placeholder-wrapper').forEach((node) => node.remove());
+
+    container.querySelectorAll('p[data-image-paragraph="true"]').forEach((node) => {
+        const hasRealMedia = !!node.querySelector('img, video, iframe, audio, svg, canvas, object, embed');
+        if (!hasRealMedia && !node.textContent.trim()) {
+            node.remove();
+        }
+    });
+
+    container.querySelectorAll('*').forEach((node) => {
+        if (!node.textContent) return;
+        const cleaned = node.textContent.replace(/\$image(?:\$|%)/gi, '');
+        if (cleaned !== node.textContent) {
+            node.textContent = cleaned;
+        }
+    });
+
+    return container.innerHTML;
+}
+
 function abrirDocumento(doc) {
 
     if (reorderingMode) {
@@ -3681,12 +7657,14 @@ function abrirDocumento(doc) {
     }
 
     const contentEl = document.getElementById('modalContent');
-    const contentToShow = currentViewVersion === 'normal' ? (doc.conteudo || '') : (doc.conteudoPasso || '');
+    const rawContent = currentViewVersion === 'normal' ? (doc.conteudo || '') : (doc.conteudoPasso || '');
+    const contentToShow = sanitizeDocReadContent(rawContent);
     if (!contentToShow || contentToShow.trim() === '') {
         const label = currentViewVersion === 'normal' ? 'normal' : 'passo a passo';
         contentEl.innerHTML = `<p style="opacity:0.8">⚠️ Nenhuma versão ${label} disponível.</p>`;
     } else {
-        contentEl.innerHTML = contentToShow;
+        // Encapsular em `.rich-editor` (não editável) para preservar estilo/quebras idênticas ao editor
+        contentEl.innerHTML = `<div class="rich-editor" aria-hidden="true">${contentToShow}</div>`;
     }
 
     const anexosSection = document.getElementById('attachmentsSection');
@@ -3712,38 +7690,42 @@ function abrirDocumento(doc) {
 
     setModalVisible('docModal', true);
 
-    // Reorganizar header-top: agrupar botões em .header-actions e colocar o título abaixo
+    // Reorganizar header-top: agrupar apenas os botões em .header-actions
+    // e garantir que o título permaneça em `.modal-header` (não movê-lo).
     try {
         const headerTop = document.querySelector('#docModal .modal-header-top');
         const header = document.querySelector('#docModal .modal-header');
         const titleEl = document.getElementById('modalTitle');
-        if (headerTop && titleEl) {
+        if (headerTop) {
             // criar header-actions se não existir
             let headerActions = headerTop.querySelector('.header-actions');
             if (!headerActions) {
                 headerActions = document.createElement('div');
                 headerActions.className = 'header-actions';
-                // mover todos os filhos existentes para headerActions
-                while (headerTop.firstChild) {
-                    headerActions.appendChild(headerTop.firstChild);
-                }
                 headerTop.appendChild(headerActions);
             }
 
-            // criar um container de título se necessário
-            let titleContainer = headerTop.querySelector('.modal-title-center');
-            if (!titleContainer) {
-                titleContainer = document.createElement('div');
-                titleContainer.className = 'modal-title-center';
-                headerTop.appendChild(titleContainer);
-            }
+            // mover apenas botões/elementos de ação para headerActions (não mover o título)
+            Array.from(headerTop.childNodes).forEach(node => {
+                if (node.nodeType === 1 && !node.classList.contains('header-actions') && !node.classList.contains('modal-title-center')) {
+                    const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                    // mover elementos de ação típicos (button, span, svg wrapper)
+                    if (tag === 'button' || tag === 'span' || tag === 'svg' || tag === 'div') {
+                        headerActions.appendChild(node);
+                    }
+                }
+            });
 
-            // garantir que o título esteja dentro do container centralizado
-            if (titleContainer && titleEl && titleContainer !== titleEl.parentNode) {
-                titleContainer.appendChild(titleEl);
+            // se houver um container antigo `.modal-title-center`, removê-lo e devolver o título ao header
+            const oldTitleContainer = headerTop.querySelector('.modal-title-center');
+            if (oldTitleContainer) {
+                if (titleEl) header.appendChild(titleEl);
+                oldTitleContainer.remove();
             }
         }
-        if (header) header.style.display = 'none';
+
+        // garantir que o header com o título esteja visível
+        if (header) header.style.display = '';
     } catch (e) {
         // noop
     }
@@ -3782,8 +7764,15 @@ function abrirEdicao() {
         document.getElementById('editDocCategory').value = doc.categoria;
     }
     document.getElementById('editDocDescription').value = doc.descricao;
-    document.getElementById('editDocContent').innerHTML = doc.conteudo;
-    document.getElementById('editDocPassoContent').innerHTML = doc.conteudoPasso || '';
+    const editDocContentEl = document.getElementById('editDocContent');
+    if (editDocContentEl) {
+        editDocContentEl.innerHTML = doc.conteudo || '';
+        replaceImageShortcutTokens(editDocContentEl);
+        ensureImagePlaceholdersInNormalEditor(editDocContentEl);
+        preserveImagePlaceholderBlock(editDocContentEl);
+    }
+    const editDocPassoEl = document.getElementById('editDocPassoContent');
+    if (editDocPassoEl) editDocPassoEl.innerHTML = doc.conteudoPasso || '';
     document.getElementById('editDocTags').value = doc.tags.join(', ');
 
     const editDocDescriptionInput = document.getElementById('editDocDescription');
@@ -3800,10 +7789,14 @@ function abrirEdicao() {
     document.getElementById('normalContentGroup').style.display = 'block';
     document.getElementById('passoContentGroup').style.display = 'none';
 
-    document.getElementById('editContentType').textContent = 'Conteúdo Normal';
-
     setModalVisible('docModal', false);
     setModalVisible('editModal', true);
+
+    // Atualiza comportamento de scroll do modal conforme largura disponível
+    try {
+        // delay curto para garantir que o modal tenha sido renderizado e medido
+        setTimeout(() => updateEditModalScrollBehavior(), 80);
+    } catch (e) {}
 
     // Por padrão, abre em tela normal (não tela metade)
     const editModalContent = document.querySelector('#editModal .modal-content');
@@ -3822,6 +7815,43 @@ function abrirEdicao() {
     }
 }
 
+// Quando o modal de edição precisa permitir o scroll do site inteiro
+function updateEditModalScrollBehavior() {
+    try {
+        const editModalContent = document.querySelector('#editModal .modal-content');
+        const editor = document.getElementById('editDocContent');
+        if (!editModalContent || !editor) return;
+
+        const modalRect = editModalContent.getBoundingClientRect();
+        const siteWidth = document.documentElement.clientWidth || window.innerWidth;
+
+        // Se o modal ocupa praticamente toda a largura do site, aplicamos a classe
+        const marginThreshold = 32; // px de folga
+        if (modalRect.width >= siteWidth - marginThreshold) {
+            editModalContent.classList.add('expand-to-site');
+            document.body.classList.add('modal-expanded-to-site');
+            try { document.documentElement.classList.add('modal-expanded-to-site'); } catch(e){}
+        } else {
+            editModalContent.classList.remove('expand-to-site');
+            document.body.classList.remove('modal-expanded-to-site');
+            try { document.documentElement.classList.remove('modal-expanded-to-site'); } catch(e){}
+        }
+    } catch (e) { /* noop */ }
+}
+
+// Registrar ouvintes que podem disparar a checagem: redimensionamento e digitação
+window.addEventListener('resize', () => {
+    try { updateEditModalScrollBehavior(); } catch(e){}
+});
+
+// Monitora entradas no editor principal para reavaliar comportamento responsivo
+document.addEventListener('input', (e) => {
+    try {
+        const target = e.target;
+        if (target && target.id === 'editDocContent') updateEditModalScrollBehavior();
+    } catch (e) {}
+}, true);
+
 function salvarEdicao(e) {
     e.preventDefault();
 
@@ -3839,11 +7869,16 @@ function salvarEdicao(e) {
         return;
     }
 
-    doc.titulo = document.getElementById('editDocTitle').value;
-    let val = document.getElementById('editDocCategory') ? document.getElementById('editDocCategory').value : '';
-    doc.categoria = val ? String(val) : 'todos';
+    const editTitleInput = document.getElementById('editDocTitle');
+    const editCategorySelect = document.getElementById('editDocCategory');
+    const selectedCatId = editCategorySelect ? (editCategorySelect.value || 'todos') : 'todos';
+    const editTituloRaw = stripCategoriaPrefixFromTitle(editTitleInput ? String(editTitleInput.value || '') : '', selectedCatId);
+    doc.titulo = buildDocTitleWithCategory(editTituloRaw, selectedCatId);
+    doc.categoria = selectedCatId ? String(selectedCatId) : 'todos';
     doc.descricao = document.getElementById('editDocDescription').value;
-    doc.conteudo = document.getElementById('editDocContent').innerHTML;
+    const editDocContentEl = document.getElementById('editDocContent');
+    cleanNormalDocImagePlaceholders(editDocContentEl);
+    doc.conteudo = editDocContentEl ? editDocContentEl.innerHTML : '';
     doc.conteudoPasso = document.getElementById('editDocPassoContent').innerHTML;
     doc.tags = tags;
     doc.dataAtualizacao = new Date().toLocaleDateString('pt-BR');
@@ -3883,7 +7918,7 @@ function pesquisarDocumentacoes() {
 
     const resultados = baseDocs.filter(doc => {
         const t = termo.startsWith('#') ? termo.substring(1) : termo;
-        return doc.tags.some(tag => tag.toLowerCase() === t);
+        return doc.tags.some(tag => tag.toLowerCase().startsWith(t));
     });
 
     renderizarDocumentacoes(resultados);
@@ -4023,19 +8058,21 @@ function adicionarCategoria(e) {
     }
 
     const editingId = document.getElementById('editingCategoryId').value;
+    const iconInput = document.getElementById('categoryIcon');
+    const iconeCategoria = iconInput?.value && String(iconInput.value).trim() ? String(iconInput.value).trim() : '📂';
     if (editingId) {
 
         const cat = categorias.find(c => c.id == parseInt(editingId));
         if (cat) {
             cat.nome = nome;
-            cat.icone = document.getElementById('categoryIcon').value || '📂';
+            cat.icone = iconeCategoria;
             const col = document.getElementById('categoryColor'); if (col) cat.cor = col.value;
         }
     } else {
         categorias.push({
             id: Date.now(),
             nome,
-            icone: document.getElementById('categoryIcon').value || '📂',
+            icone: iconeCategoria,
             cor: (document.getElementById('categoryColor') ? document.getElementById('categoryColor').value : undefined)
         });
     }
@@ -4184,8 +8221,237 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, m => map[m]);
 }
 
-function renderMessageHTML(text) {
-    // escape then convert newlines to <br>
-    const safe = escapeHtml(String(text || ''));
-    return safe.replace(/\n/g, '<br>');
+function processMarkdown(text) {
+    // converter headings: # H1, ## H2, ### H3, etc até ###### H6
+    text = text.replace(/^###### (.*?)$/gm, '<h6>$1</h6>');
+    text = text.replace(/^##### (.*?)$/gm, '<h5>$1</h5>');
+    text = text.replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
+    text = text.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+    text = text.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+    text = text.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+    // converter **texto** para <strong>texto</strong>
+    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    return text;
 }
+
+function processMarkdownBold(text) {
+    // converter **texto** para <strong>texto</strong>
+    return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+}
+
+function createAiVisualImagePlaceholder() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'doc-image-placeholder-wrapper ai-image-placeholder';
+    wrapper.setAttribute('contenteditable', 'false');
+    wrapper.setAttribute('data-ai-visual', 'true');
+    wrapper.setAttribute('aria-hidden', 'true');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'doc-image-placeholder-btn';
+    btn.textContent = '🖼️';
+    btn.title = 'Imagem sugerida pela IA';
+    btn.disabled = true;
+    wrapper.appendChild(btn);
+
+    return wrapper.outerHTML;
+}
+
+function renderAiVisualImageTokens(html) {
+    return String(html || '').replace(/\$image(?:\$|%)/gi, createAiVisualImagePlaceholder());
+}
+
+function normalizeOutgoingLinks(html) {
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(String(html || ''), 'text/html');
+        doc.querySelectorAll('a[href]').forEach(a => {
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+        });
+        return doc.body.innerHTML;
+    } catch (e) {
+        return String(html || '');
+    }
+}
+
+function renderMessageHTML(text) {
+    const raw = String(text || '');
+    // Prefer a full Markdown renderer when available (marked + DOMPurify)
+    if (typeof marked !== 'undefined') {
+        try {
+            const html = marked.parse(raw);
+            if (typeof DOMPurify !== 'undefined') {
+                return normalizeOutgoingLinks(DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'rel'] }));
+            }
+            return normalizeOutgoingLinks(html);
+        } catch (e) {
+            // fallthrough to simple fallback
+        }
+    }
+    // Fallback: escape, convert newlines and apply simple markdown (headings/bold)
+    let safe = escapeHtml(raw);
+    safe = safe.replace(/\n/g, '<br>');
+    safe = processMarkdown(safe);
+    return normalizeOutgoingLinks(safe);
+}
+
+/* Abre o modal de configurações de IA direto na seção de Summary System Prompt e foca o campo */
+function openSummaryPrompt() {
+    try {
+        if (typeof populateSettingsModal === 'function') populateSettingsModal();
+        setModalVisible('aiSettingsModal', true);
+        setTimeout(() => {
+            const el = document.getElementById('aiSummarySystemPrompt');
+            if (el) {
+                try { el.focus(); } catch(e){}
+                if (typeof el.select === 'function') try { el.select(); } catch(e){}
+                try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e){}
+            }
+        }, 120);
+    } catch (e) { console.warn('openSummaryPrompt failed', e); }
+}
+
+// Expor para uso via console/UI
+window.openSummaryPrompt = openSummaryPrompt;
+
+// Insere o prompt fornecido pelo usuário no System Prompt e salva (útil para testes rápidos)
+window.insertCustomSystemPrompt = function() {
+    const prompt = `Considere como DOCUMENTAÇÃO todo texto que descreva um procedimento funcional de sistema ou aplicativo.
+Ignore apenas instruções sobre como você deve responder.
+
+Sua tarefa é REESTRUTURAR o conteúdo mantendo integralmente todas as informações operacionais.
+
+Remover exclusivamente:
+Frases explicativas que não alteram a execução.
+Comentários descritivos.
+Observações condicionais que não exigem ação direta.
+Resultados esperados após a ação.
+
+Manter obrigatoriamente:
+Comandos
+Campos
+Valores
+Datas
+Identificadores
+Parâmetros
+Textos entre aspas
+Informações após dois pontos (:)
+Sequência original
+
+REGRA CRÍTICA DE PRESERVAÇÃO ADICIONAL:
+
+Qualquer linha que contenha pelo menos um dos elementos abaixo deve ser mantida obrigatoriamente, mesmo que pareça explicativa:
+
+Dois pontos (:)
+
+Texto entre aspas
+
+Números
+
+Datas
+
+Valores monetários
+
+Códigos
+
+Identificadores técnicos
+
+Nome de botão
+
+Nome de campo
+
+Nome de aba
+
+Nome de menu
+
+Nome de tela
+
+Status
+
+Tipo
+
+Diretório
+
+Nunca remover uma linha que contenha qualquer um desses elementos.
+
+Não resumir.
+Não simplificar.
+Não reorganizar.
+Não alterar a ordem.
+Não inferir.
+Não inventar etapas.
+Nunca transformar instruções deste prompt em conteúdo da saída.
+
+REGRA OBRIGATÓRIA PARA TÍTULOS
+
+Sempre que encontrar uma linha que represente uma seção, inclusive linhas iniciadas por:
+
+TEXTO ORIGINAL DA SEÇÃO
+
+Você deve:
+
+Remover completamente a expressão "TEXTO ORIGINAL DA SEÇÃO".
+Manter apenas o nome real da seção.
+Converter obrigatoriamente para o formato:
+
+NOME DA SEÇÃO
+
+Exemplo obrigatório de transformação:
+
+TEXTO ORIGINAL DA SEÇÃO ACESSO AO PERFIL DIGITAL
+
+Deve se tornar exatamente:
+
+ACESSO AO PERFIL DIGITAL
+
+Nunca manter o prefixo original.
+Nunca ignorar a transformação.
+Nunca manter o título em formato simples.
+
+REGRAS DE FORMATAÇÃO
+
+Todo texto entre aspas deve:
+Permanecer com aspas
+Estar totalmente em negrito
+
+Todo valor que apareça após dois pontos (:) deve estar em negrito.
+
+Elementos interativos também devem estar em negrito, incluindo:
+Botões
+Abas
+Itens selecionáveis
+Campos
+Valores digitados
+Diretórios
+Tipos
+Status
+
+Estrutura obrigatória:
+Uma única ação ou informação operacional por linha.
+Inserir uma linha em branco entre todas as linhas.
+Inserir uma linha em branco após cada título.
+Nunca juntar múltiplas ações na mesma linha.
+Nunca retornar o conteúdo em bloco único.
+
+FORMATO FINAL
+
+Títulos obrigatoriamente no formato ##.
+Conteúdo abaixo do título correspondente.
+Uma linha por ação ou informação operacional.
+Linha em branco entre todas as linhas.
+Nada além do conteúdo estruturado.
+
+Se não houver ações funcionais, responder exatamente:
+Nenhuma interação identificada.`;
+
+    const el = document.getElementById('aiSummarySystemPrompt');
+    if (el) el.value = prompt;
+    try {
+        // persistir summary (passo a passo) via autoSave
+        try { autoSaveAISettings(); } catch(e) { /* non-fatal */ }
+        try { showToast('✅ Passo a passo inserido', 'success'); } catch(e){}
+    } catch (e) {
+        console.error('insertCustomSummaryPrompt failed', e);
+    }
+};

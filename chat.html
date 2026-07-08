@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chat IA - DocHub</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        (function(){
+            try {
+                const links = document.querySelectorAll('link[rel="stylesheet"]');
+                links.forEach(l => {
+                    if(l.getAttribute('href') && l.getAttribute('href').indexOf('styles.css') !== -1){
+                        const base = 'styles.css';
+                        const url = base + '?v=' + Date.now();
+                        l.setAttribute('href', url);
+                    }
+                });
+            } catch(e){ }
+        })();
+    </script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-container chat-navbar">
+            <button id="chatBackBtn" class="btn-chat-back" title="Voltar para a tela anterior" aria-label="Voltar" style="display:flex !important; visibility:visible !important; opacity:1 !important; position:relative !important; z-index:999 !important; margin-right:16px !important;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Voltar</span>
+            </button>
+            <div class="navbar-logo">
+                <span class="logo-icon">🤖</span>
+                <h1 class="navbar-title">Chat IA</h1>
+            </div>
+            <div class="top-actions" style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+                <button id="clearChatTopBtn" class="btn-clear-top" title="Limpar histórico do chat" aria-label="Limpar chat">🗑️</button>
+                <button id="chatEditorToggle" class="chat-editor-toggle" aria-label="Abrir editor" title="Editar documentação">📝</button>
+                <button id="chatSaveDocsBtn" class="btn-clear-top" title="Salvar documentação" aria-label="Salvar documentação">💾</button>
+                <button id="aiSettingsBtn" class="btn-settings btn-ai-settings" title="Configurações de IA" aria-label="Configurações de IA" style="display: flex;">
+                    ⚙️
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content" style="padding:1rem;">
+        <div class="chat-main">
+        <section id="chat" class="content-section active" style="display:block;">
+            <div class="chat-wrapper">
+                <div class="chat-container">
+                    <!-- chat-controls removido para liberar espaço vertical do chat -->
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-message bot">
+                            <div class="message-content">
+                                <p>Olá! 👋 Sou seu assistente de IA. Faça perguntas sobre suas documentações, peça resumos ou ajuda na busca de informações. Como posso ajudá-lo?</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <div id="activePromptsWrapper" class="chat-active-prompts" style="display:none;">
+                            <div id="activePromptsList" class="active-prompts-list"></div>
+                        </div>
+                        <textarea id="chatInput" class="chat-input" placeholder="Digite sua mensagem..." rows="3" aria-label="Mensagem para o Chat IA"></textarea>
+                        <button id="chatSendBtn" class="btn-send-chat">Enviar</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Editor lateral para editar versão Normal / Passo a Passo vinculada à documentação -->
+        <aside id="chatSidebarEditor" class="chat-sidebar-editor" aria-label="Editor da documentação">
+            <div class="chat-editor-header">
+                <div class="editor-tabs">
+                    <button id="editorTabNormal" class="editor-tab active">📄 Normal</button>
+                    <button id="editorTabPasso" class="editor-tab">👣 Passo a Passo</button>
+                </div>
+            </div>
+            <div class="chat-editor-body">
+                <div id="chatEditContent" class="rich-editor chat-rich-editor" contenteditable="true" data-placeholder="Conteúdo Normal"></div>
+                <div id="chatEditPassoContent" class="rich-editor chat-rich-editor" contenteditable="true" data-placeholder="Conteúdo Passo a Passo" style="display:none;"></div>
+                <div id="passoResumoWrapper" style="display:none; padding:8px 12px; text-align:center;">
+                    <button id="passoResumoBtn" class="btn-resumo">Resumir</button>
+                </div>
+            </div>
+            <div class="chat-editor-footer" style="text-align:center; font-size:0.85rem; color:var(--text-secondary); padding:8px;">
+                Edições aqui serão aplicadas à documentação correspondente.
+            </div>
+        </aside>
+        </div>
+    </main>
+    <div id="aiSettingsModal" class="modal" aria-hidden="true">
+        <div class="modal-content modal-large">
+            <div class="modal-header-top">
+                <h3 style="margin: 0; color: #fff; font-weight: 800;">⚙️ Configurações de IA</h3>
+                <button class="close-ai-settings" aria-label="Fechar">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Abas de configuração -->
+                <div class="ai-settings-tabs">
+                    <button class="ai-tab-btn" data-tab="test">🧪 Testar Conexão</button>
+                    <button class="ai-tab-btn active" data-tab="api">🔑 API & Modelo</button>
+                    <button class="ai-tab-btn" data-tab="system">📋 Passo a passo</button>
+                    <button class="ai-tab-btn" data-tab="commands">🧠 Comandos @</button>
+                </div>
+
+                <!-- Aba 1: Testar Conexão -->
+                <div class="ai-tab-content" data-tab="test">
+                    <div class="settings-section">
+                        <h4>🧪 Teste de Conexão</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Cole sua API Key e teste automaticamente em todos os modelos
+                        </p>
+                        
+                        <div id="testConnectionStatus" style="margin-bottom: 16px; padding: 12px; border-radius: 6px; background: rgba(99, 102, 241, 0.05); display: none;">
+                            <div id="testConnectionMessage" style="font-weight: 600; color: var(--primary-color);">⏳ Testando...</div>
+                        </div>
+
+                        <div class="settings-option">
+                            <label>🔑 Cole sua API Key</label>
+                            <input type="text" id="testApiKey" class="settings-input" placeholder="Cole sua API Key" style="margin-bottom: 8px;" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" name="ai-test-api-key">
+                        </div>
+
+                        <div class="settings-actions" style="margin-top: 20px;">
+                            <button type="button" id="runConnectionTestBtn" class="btn-wide">🚀 Testar Automaticamente</button>
+                        </div>
+
+                        <div id="testResults" style="margin-top: 20px; display: none;">
+                            <div style="padding: 12px; border-radius: 6px; background: rgba(99, 102, 241, 0.05); border: 2px solid var(--primary-color);">
+                                <h5 style="margin: 0 0 12px 0; font-weight: 700;">📊 Resultado do Teste</h5>
+                                <div id="testResultsContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Aba 2: API & Modelo -->
+                <div class="ai-tab-content active" data-tab="api">
+                    <div class="settings-section">
+                        <h4>🔑 Chave de API</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Configure sua chave de API para usar a IA
+                        </p>
+                        <div id="apiKeyStatusBadge" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; background: rgba(239, 68, 68, 0.1); color: #ef4444; font-weight: 600; display: none; text-align: center;">
+                            ❌ API Key inválida ou não configurada
+                        </div>
+                        <div class="settings-option">
+                            <label>API Key</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="text" id="aiApiKey" class="settings-input" placeholder="Cole sua API Key" style="flex:1;" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" name="ai-api-key">
+                                <button type="button" id="toggleAiKeyBtn" class="btn-small" title="Mostrar/ocultar chave" style="white-space:nowrap;">
+                                    <!-- ícone padrão: olho aberto -->
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <button type="button" class="btn-small" id="validateApiKeyBtn" style="margin-top: 6px; width: 100%; background: var(--primary-color); color: white;">🔍 Validar Chave</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" style="margin-top: 16px;">
+                        <h4>🤖 Modelo</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Escolha qual modelo de IA usar para respostas
+                        </p>
+                        <div class="settings-option">
+                            <div class="model-grid">
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-3.5-turbo" checked>
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 3.5 Turbo</div>
+                                        <div class="model-description">Rápido e econômico</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gemini-2.5-flash">
+                                    <div class="model-card">
+                                        <div class="model-name">Gemini 2.5 Flash (grátis)</div>
+                                        <div class="model-description">Modelo Gemini gratuito recomendado para a API atual</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-4">
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 4</div>
+                                        <div class="model-description">Mais poderoso</div>
+                                    </div>
+                                </label>
+                                <label class="model-option">
+                                    <input type="radio" name="aiModel" value="gpt-4-turbo">
+                                    <div class="model-card">
+                                        <div class="model-name">GPT 4 Turbo</div>
+                                        <div class="model-description">Rápido e potente</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    
+
+                    <div class="settings-actions" style="margin-top: 20px;">
+                        <button type="button" id="saveApiSettingsBtn" class="btn-wide">💾 Salvar Configurações</button>
+                    </div>
+                </div>
+
+                <!-- Aba 3: System Prompt -->
+                <div class="ai-tab-content" data-tab="system">
+                    <div class="settings-section">
+                        <h4>📋 System Prompt (Como a IA se comporta)</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Define o comportamento, tom e diretrizes para a IA. Similar ao ChatGPT.
+                        </p>
+                        <div class="settings-option">
+                            <label for="aiSummarySystemPrompt" style="font-weight:600; display:block; margin-bottom:0.75rem;">Passo a passo</label>
+                            <textarea id="aiSummarySystemPrompt" class="settings-textarea" placeholder="Prompt de passo a passo será criado quando você clicar em 'Resumir'." rows="8"></textarea>
+                            <small style="color:var(--text-secondary); display:block; margin-top:8px;">Esse prompt será usado para gerar respostas no formato passo a passo.</small>
+                        </div>
+                    </div>
+
+                    <!-- Max Tokens removido conforme solicitado -->
+
+                    <div class="settings-actions" style="margin-top: 20px;">
+                        <!-- System Prompt normal removido; uso de passo a passo é salvo via 'Salvar Configurações' -->
+                    </div>
+                </div>
+
+                <div class="ai-tab-content" data-tab="commands">
+                    <div class="settings-section">
+                        <h4>🧠 Comandos @</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 8px 0;">
+                            Configure comandos <code>@nome</code> que substituem o System Prompt apenas para essa mensagem.
+                        </p>
+                        <div id="aiCommandsList" class="ai-commands-list"></div>
+                        <div class="ai-command-actions">
+                            <button type="button" id="addAiCommandBtn" class="btn-wide">➕ Novo Comando</button>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+                            Exemplo: <code>@duvida</code> carrega um prompt dedicado e substitui o prompt padrão apenas para essa mensagem.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <div id="mentionPopup" class="mention-popup" aria-hidden="true" role="listbox"></div>
+    <script src="ai_config_utils.js"></script>
+    <script src="script.js"></script>
+    <script>
+        // Ao carregar a página de chat, verificar se há prefill enviado por outra página
+        // NÃO enviar automaticamente: apenas preencher o input para leitura/edit.
+        document.addEventListener('DOMContentLoaded', () => {
+            try {
+                const raw = localStorage.getItem('dochub-chat-prefill');
+                if (raw) {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && parsed.docId) {
+                            localStorage.setItem('dochub-chat-scope', JSON.stringify({ docId: parsed.docId }));
+                        }
+                        // Se o prefill trouxer texto/HTML (ex: vindo da tela de Adicionar),
+                        // garantir que o rascunho do sidebar seja criado para que o editor
+                        // lateral restaure o conteúdo corretamente.
+                        try {
+                            const SIDEBAR_KEY = 'dochub-chat-sidebar-draft';
+                            if (parsed) {
+                                // Ensure editor tab matches prefill intent (passo vs normal)
+                                try {
+                                    if (parsed.isPasso) {
+                                        localStorage.setItem('dochub-chat-editor-tab', 'passo');
+                                        const cEl = document.getElementById('chatEditContent');
+                                        const pEl = document.getElementById('chatEditPassoContent');
+                                        if (cEl) cEl.style.display = 'none';
+                                        if (pEl) pEl.style.display = '';
+                                        const tabPasso = document.getElementById('editorTabPasso');
+                                        const tabNormal = document.getElementById('editorTabNormal');
+                                        if (tabPasso) tabPasso.classList.add('active');
+                                        if (tabNormal) tabNormal.classList.remove('active');
+                                        try { document.body.classList.add('chat-mode-passo'); document.body.classList.remove('chat-mode-normal'); } catch(e){}
+                                    } else {
+                                        localStorage.setItem('dochub-chat-editor-tab', 'normal');
+                                        const cEl = document.getElementById('chatEditContent');
+                                        const pEl = document.getElementById('chatEditPassoContent');
+                                        if (cEl) cEl.style.display = '';
+                                        if (pEl) pEl.style.display = 'none';
+                                        const tabPasso = document.getElementById('editorTabPasso');
+                                        const tabNormal = document.getElementById('editorTabNormal');
+                                        if (tabNormal) tabNormal.classList.add('active');
+                                        if (tabPasso) tabPasso.classList.remove('active');
+                                        try { document.body.classList.add('chat-mode-normal'); document.body.classList.remove('chat-mode-passo'); } catch(e){}
+                                    }
+                                } catch(e) {}
+                                // se já existir um rascunho, mesclar respeitando campos presentes
+                                const existingRaw = localStorage.getItem(SIDEBAR_KEY);
+                                let existing = existingRaw ? JSON.parse(existingRaw) : null;
+                                if (!existing) existing = {};
+                                // Priorizar campos explícitos do prefill (sem remover o outro campo existente)
+                                if (parsed.content !== undefined) existing.content = parsed.content;
+                                if (parsed.passo !== undefined) existing.passo = parsed.passo;
+                                if (parsed.text !== undefined && !existing.content) existing.content = parsed.text;
+                                if (parsed.docId !== undefined) existing.docId = parsed.docId;
+                                existing.ts = Date.now();
+                                localStorage.setItem(SIDEBAR_KEY, JSON.stringify(existing));
+                                // attempt to directly populate the sidebar fields
+                                try {
+                                    const chatContentEl = document.getElementById('chatEditContent');
+                                    const chatPassoEl = document.getElementById('chatEditPassoContent');
+                                    if (chatContentEl && existing.content !== undefined) chatContentEl.innerHTML = existing.content || '';
+                                    if (chatPassoEl && existing.passo !== undefined) chatPassoEl.innerHTML = existing.passo || '';
+                                    const prefTab = (parsed && parsed.isPasso) ? 'passo' : (localStorage.getItem('dochub-chat-editor-tab') || 'normal');
+                                    if (prefTab === 'passo') {
+                                        if (chatContentEl) chatContentEl.style.display = 'none';
+                                        if (chatPassoEl) chatPassoEl.style.display = '';
+                                    } else {
+                                        if (chatContentEl) chatContentEl.style.display = '';
+                                        if (chatPassoEl) chatPassoEl.style.display = 'none';
+                                    }
+                                    const tabPasso = document.getElementById('editorTabPasso');
+                                    const tabNormal = document.getElementById('editorTabNormal');
+                                    if (prefTab === 'passo') {
+                                        if (tabPasso) tabPasso.classList.add('active');
+                                        if (tabNormal) tabNormal.classList.remove('active');
+                                    } else {
+                                        if (tabNormal) tabNormal.classList.add('active');
+                                        if (tabPasso) tabPasso.classList.remove('active');
+                                    }
+                                } catch(e) { /* ignore DOM write errors */ }
+                            }
+                        } catch (e) { /* silent */ }
+                    } catch (e) {
+                        // prefill may be plain string
+                    }
+                    try { localStorage.removeItem('dochub-chat-prefill'); } catch(e){}
+                }
+            } catch (e) { }
+            try {
+                const chatBackBtn = document.getElementById('chatBackBtn');
+                if (chatBackBtn) chatBackBtn.style.display = 'flex';
+            } catch (e) {}
+            try {
+                // If opener requested chat to open empty (from 'Nova Documentação'),
+                // clear UI history and ensure scope is null to avoid showing unrelated messages.
+                const openEmpty = localStorage.getItem('dochub-chat-open-empty') === 'true';
+                if (openEmpty) {
+                    try { localStorage.removeItem('dochub-chat-open-empty'); } catch(e){}
+                    try { if (typeof setChatScope === 'function') setChatScope(null); } catch(e){}
+                    try { if (typeof renderChatMessages === 'function') renderChatMessages([]); } catch(e){}
+                    // Também limpar o storage persistente para evitar restauração após reload
+                    try { localStorage.removeItem('dochub-chat-histories'); } catch(e){}
+                    try { localStorage.removeItem('dochub-chat-scope'); } catch(e){}
+                    // keep restoring any sidebar draft previously saved above
+                    return;
+                }
+
+            
+                // Ensure standalone chat restores scope/banner and back button without requiring F5
+                if (typeof restoreChatScopeFromStorage === 'function') {
+                    try { restoreChatScopeFromStorage(); } catch(e){}
+                }
+                // debug marker: record what return-section exists at chat load
+                try { localStorage.setItem('dochub-debug-chatLoad', JSON.stringify({ ts: Date.now(), returnSection: localStorage.getItem('dochub-chat-return-section') })); } catch(e){}
+            } catch(e){}
+        });
+    </script>
+</body>
+</html>

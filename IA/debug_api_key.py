@@ -31,8 +31,7 @@ def testar_chave(api_key):
             },
             json={
                 'model': 'gpt-3.5-turbo',
-                'messages': [{'role': 'user', 'content': 'Responda com "OK"'}],
-                'max_tokens': 10
+                'messages': [{'role': 'user', 'content': 'Responda com "OK"'}]
             },
             timeout=10
         )
